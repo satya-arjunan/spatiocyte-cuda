@@ -228,6 +228,19 @@ int Random::IRan(int min, int max) {
    return (int32_t)iran + min;
 }
 
+mol_t Random::UmolRan(mol_t min, mol_t max) {
+   // Assume 64 bit integers supported. Use multiply and shift method
+   umol_t interval;                  // Length of interval
+   umol2_t longran;                   // Random bits * interval
+   umol_t iran;                      // Longran / 2^32
+
+   interval = (umol_t)(max - min + 1);
+   longran  = (umol2_t)BRan() * interval;
+   iran = (umol_t)(longran >> sizeof(umol_t)*8);
+   // Convert back to signed and return result
+   return (mol_t)iran + min;
+}
+
 
 uint32_t Random::RanUint32_12() {
    return (uint32_t)(((uint64_t)BRan()*12) >> 32);

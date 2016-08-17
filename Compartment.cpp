@@ -49,17 +49,20 @@ Compartment::Compartment(std::string name, const double len_x,
     surface_species_("surface", 0, 0, model, *this, volume_species_, true) {}
 
 void Compartment::initialize() {
+  long num_voxel(long(NUM_COL)*NUM_ROW*NUM_LAY);
+  long max_umol_t(pow(2,sizeof(umol_t)*8));
+  if(num_voxel > max_umol_t)
+    {
+      std::cout << "Number of voxels:" << num_voxel <<
+        " exceeds max value of umol_t:" << max_umol_t << std::endl;
+      std::cout << "Reduce lattice lengths or change umol_t type in " <<
+        "Common.hpp. Exiting now..." << std::endl;
+      exit(0);
+    }
   lattice_.initialize();
   set_offsets();
   set_volume_structure();
   set_surface_structure();
-  umol_t multiplier_colrow, multiplier_row, nshift_colrow, nshift_row;
-  set_const_division_param(NUM_COLROW, &multiplier_colrow, &nshift_colrow);
-  multiplier_colrow_ = _mm256_set1_epi16(multiplier_colrow);
-  nshift_colrow_ = _mm_set_epi64x((uint64_t)0, (uint64_t)nshift_colrow);
-  set_const_division_param(NUM_ROW, &multiplier_row, &nshift_row);
-  multiplier_row_ = _mm256_set1_epi16(multiplier_row);
-  nshift_row_ = _mm_set_epi64x((uint64_t)0, (uint64_t)nshift_row);
 }
 
 umol_t Compartment::get_tar(const umol_t vdx, const unsigned nrand) const {
@@ -67,7 +70,7 @@ umol_t Compartment::get_tar(const umol_t vdx, const unsigned nrand) const {
   const bool odd_col((vdx%NUM_COLROW/NUM_ROW)&1);
   //return vdx+offsets_[nrand+odd_lay*24+odd_col*12];
   //return vdx+offsets_[nrand+odd_lay+odd_col];
-  int val(int(vdx)+offsets_[nrand+(24&(-odd_lay))+(12&(-odd_col))]);
+  mol2_t val(mol2_t(vdx)+offsets_[nrand+(24&(-odd_lay))+(12&(-odd_col))]);
   if(val < 0 || val > NUM_VOXEL) {
     return vdx;
   }
@@ -236,377 +239,6 @@ umol_t Compartment::get_tar(const umol_t vdx, const unsigned nrand) const {
   //vdx.m256i = _mm256_load_si256(mvdx);
 }
 
-/*AVX2 SIMD implementation of:
- *  const bool odd_lay((vdx/NUM_COLROW)&1);
- *  const bool odd_col((vdx%NUM_COLROW/NUM_ROW)&1);
- *  return vdx+offsets_[nrand+(24&(-odd_lay))+(12&(-odd_col))];
- */
-void Compartment::set_tars(const __m256i vdx, __m256i nrand,
-    uint32_t* tars) const { 
-  //[mull] multiply unsigned and store high 16 bit result
-  //vdx*multiplier
-  __m256i quotient_colrow(_mm256_mulhi_epu16(vdx, multiplier_colrow_));
-  //[shrl] shift right logical (set the new bits on the left as 0)
-  //vdx/num_colrow = vdx*multiplier/2^nshift_colrow_
-  quotient_colrow = _mm256_srl_epi16(quotient_colrow, nshift_colrow_);
-  __m256i odd_lay(_mm256_and_si256(quotient_colrow, _mm256_set1_epi16(1)));
-  //[imull] signed multiply and store low 16 bit result
-  //(vdx/num_colrow)*num_colrow
-  quotient_colrow = _mm256_mullo_epi16(quotient_colrow,
-                                       _mm256_set1_epi16(NUM_COLROW));
-  //[subl] a-b 
-  //remainder = vdx-(vdx/num_colrow)*num_colrow
-  __m256i remainder_colrow(_mm256_sub_epi16(vdx, quotient_colrow));
-  //remainder*multiplier
-  __m256i quotient_row(_mm256_mulhi_epu16(remainder_colrow, multiplier_row_));
-  //remainder*multiplier/2^nshift_row_
-  quotient_row = _mm256_srl_epi16(quotient_row, nshift_row_);
-  __m256i odd_col(_mm256_and_si256(quotient_row, _mm256_set1_epi16(1)));
-  //Option 2 faster
-  odd_lay = _mm256_sign_epi16(odd_lay, _mm256_set1_epi64x(-1));
-  odd_lay = _mm256_and_si256(odd_lay, _mm256_set1_epi16(24));
-  odd_col = _mm256_sign_epi16(odd_col, _mm256_set1_epi64x(-1));
-  odd_col = _mm256_and_si256(odd_col, _mm256_set1_epi16(12));
-  nrand = _mm256_add_epi16(nrand, odd_lay);
-  nrand = _mm256_add_epi16(nrand, odd_col);
-  //cast first 8 indices from uint16_t to uint32_t
-  __m256i index(_mm256_cvtepu16_epi32(_mm256_castsi256_si128(nrand)));
-  //get the first 8 offsets
-  index = _mm256_i32gather_epi32(offsets_, index, 4);
-  //cast first 8 vdx from uint16_t to uint32_t and add with offset
-  *(__m256i*)(tars) = 
-    _mm256_add_epi32(_mm256_cvtepu16_epi32(_mm256_castsi256_si128(vdx)), index);
-  //cast second 8 indices from uint16_t to uint32_t
-  index = _mm256_cvtepu16_epi32(_mm256_extractf128_si256(nrand, 1));
-  //get the second 8 offsets
-  index =  _mm256_i32gather_epi32(offsets_, index, 4);
-  //cast second 8 vdx from uint16_t to uint32_t and add with offset
-  *(__m256i*)(&tars[8]) =
-    _mm256_add_epi32(_mm256_cvtepu16_epi32(_mm256_extractf128_si256(vdx, 1)),
-                     index);
-}
-
-/*AVX2 SIMD implementation of:
- *  const bool odd_lay((vdx/NUM_COLROW)&1);
- *  const bool odd_col((vdx%NUM_COLROW/NUM_ROW)&1);
- *  return vdx+offsets_[nrand+(24&(-odd_lay))+(12&(-odd_col))];
- */
-__m256i Compartment::get_tars(const __m256i vdx, __m256i nrand) const { 
-  /*
-  union256 arand;
-  arand.m256i = nrand;
-  */
-
-  //[mull] multiply unsigned and store high 16 bit result
-  //vdx*multiplier
-  __m256i quotient_colrow(_mm256_mulhi_epu16(vdx, multiplier_colrow_));
-  //[shrl] shift right logical (set the new bits on the left as 0)
-  //vdx/num_colrow = vdx*multiplier/2^nshift_colrow_
-  quotient_colrow = _mm256_srl_epi16(quotient_colrow, nshift_colrow_);
-  __m256i odd_lay(_mm256_and_si256(quotient_colrow, _mm256_set1_epi16(1)));
-  //[imull] signed multiply and store low 16 bit result
-  //(vdx/num_colrow)*num_colrow
-  quotient_colrow = _mm256_mullo_epi16(quotient_colrow,
-                                       _mm256_set1_epi16(NUM_COLROW));
-  //[subl] a-b 
-  //remainder = vdx-(vdx/num_colrow)*num_colrow
-  __m256i remainder_colrow(_mm256_sub_epi16(vdx, quotient_colrow));
-  //remainder*multiplier
-  __m256i quotient_row(_mm256_mulhi_epu16(remainder_colrow, multiplier_row_));
-  //remainder*multiplier/2^nshift_row_
-  quotient_row = _mm256_srl_epi16(quotient_row, nshift_row_);
-  __m256i odd_col(_mm256_and_si256(quotient_row, _mm256_set1_epi16(1)));
-  /*
-  odd_lay = _mm256_mullo_epi16(odd_lay, _mm256_set1_epi16(24));
-  odd_col = _mm256_mullo_epi16(odd_col, _mm256_set1_epi16(12));
-  */
-  //combine 4 instructions below into:
-  //left shift 8 bits (1 byte) of odd_lay
-  //odd_lay = _mm256_slli_epi16(odd_lay, 8);
-  //Option 1
-  /*
-  odd_lay = _mm256_slli_si256(odd_lay, 1);
-  //OR odd_lay with odd_col
-  odd_lay = _mm256_or_si256(odd_lay, odd_col);
-  odd_lay = _mm256_maddubs_epi16(odd_lay, _mm256_set1_epi16(24));
-  nrand = _mm256_add_epi16(nrand, odd_lay);
-  */
-  //Option 2 faster
-  odd_lay = _mm256_sign_epi16(odd_lay, _mm256_set1_epi64x(-1));
-  odd_lay = _mm256_and_si256(odd_lay, _mm256_set1_epi16(24));
-  odd_col = _mm256_sign_epi16(odd_col, _mm256_set1_epi64x(-1));
-  odd_col = _mm256_and_si256(odd_col, _mm256_set1_epi16(12));
-  nrand = _mm256_add_epi16(nrand, odd_lay);
-  nrand = _mm256_add_epi16(nrand, odd_col);
-  /*
-  odd_lay = _mm256_maddubs_epi16(odd_lay, _mm256_set1_epi16(24));
-  odd_col = _mm256_maddubs_epi16(odd_col, _mm256_set1_epi16(12));
-  nrand.m256i = _mm256_add_epi16(nrand.m256i, odd_col);
-  nrand.m256i = _mm256_add_epi16(nrand.m256i, odd_lay);
-  */
-  /*
-  union256 mvdx;
-  mvdx.m256i = vdx;
-  for(unsigned i(0); i != 16; ++i)
-    {
-      std::cout << "index:" << nrand.uint16[i];
-      const bool bodd_lay((mvdx.uint16[i]/NUM_COLROW)&1);
-      const bool bodd_col((mvdx.uint16[i]%NUM_COLROW/NUM_ROW)&1);
-      std::cout << " actual:" << 
-        arand.uint16[i]+(24&(-bodd_lay))+(12&(-bodd_col)) << std::endl;
-    }
-  exit(0);
-  */
-  //cast first 8 indices from uint16_t to uint32_t
-  __m256i index(_mm256_cvtepu16_epi32(_mm256_castsi256_si128(nrand)));
-  //get the first 8 offsets
-  index = _mm256_i32gather_epi32(offsets_, index, 4);
-  //cast first 8 vdx from uint16_t to uint32_t and add with offset
-  __m256i tar1 = _mm256_add_epi32(_mm256_cvtepu16_epi32(_mm256_castsi256_si128(vdx)), index);
-                                                     
-  //cast second 8 indices from uint16_t to uint32_t
-  index = _mm256_cvtepu16_epi32(_mm256_extractf128_si256(nrand, 1));
-  //get the second 8 offsets
-  index =  _mm256_i32gather_epi32(offsets_, index, 4);
-  //cast second 8 vdx from uint16_t to uint32_t and add with offset
-  __m256i tar2 =
-    _mm256_add_epi32(_mm256_cvtepu16_epi32(_mm256_extractf128_si256(vdx, 1)),
-                     index);
-  tar2 = _mm256_packus_epi32(tar1, tar2);
-  return _mm256_permute4x64_epi64(tar2, 216);
-  /*
-   Option 2: slower
-  __m256i index(_mm256_cvtepu16_epi32(_mm256_castsi256_si128(nrand)));
-  //get the first 8 offsets
-  index = _mm256_i32gather_epi32(offsets_, index, 4);
-  //cast first 8 vdx from uint16_t to uint32_t and add with offset
-  __m256i tar1 = _mm256_add_epi32(_mm256_cvtepu16_epi32(_mm256_castsi256_si128(vdx)), index);
-  __m128i tar1high = _mm256_extractf128_si256(tar1, 1);
-                                                     
-  //cast second 8 indices from uint16_t to uint32_t
-  index = _mm256_cvtepu16_epi32(_mm256_extractf128_si256(nrand, 1));
-  //get the second 8 offsets
-  index =  _mm256_i32gather_epi32(offsets_, index, 4);
-  //cast second 8 vdx from uint16_t to uint32_t and add with offset
-  __m256i tar2 =
-    _mm256_add_epi32(_mm256_cvtepu16_epi32(_mm256_extractf128_si256(vdx, 1)),
-                     index);
-  tar1 = _mm256_insertf128_si256(tar1, _mm256_castsi256_si128(tar2), 1);
-  tar2 = _mm256_insertf128_si256(tar2, tar1high, 0);
-  return _mm256_packus_epi32(tar1, tar2);
-  */
-  /*
-
-  union256 mvdx;
-  mvdx.m256i = vdx;
-  for(unsigned i(0); i != 16; ++i)
-    {
-      std::cout << "tar:" << ((uint16_t*)&tar2)[i];
-      const bool bodd_lay((mvdx.uint16[i]/NUM_COLROW)&1);
-      const bool bodd_col((mvdx.uint16[i]%NUM_COLROW/NUM_ROW)&1);
-      std::cout << " actual:" << mvdx.uint16[i]+offsets_[
-        arand.uint16[i]+(24&(-bodd_lay))+(12&(-bodd_col))] << std::endl;
-    }
-  exit(0);
-  */
-}
-  /*
-  __m256i quotient_colrow(_mm256_mulhi_epu16(vdx, multiplier_colrow_));
-  quotient_colrow = _mm256_srl_epi16(quotient_colrow, nshift_colrow_);
-  __m256i odd_lay(_mm256_and_si256(quotient_colrow, _mm256_set1_epi16(1)));
-  quotient_colrow = _mm256_mullo_epi16(quotient_colrow,
-                                       _mm256_set1_epi16(NUM_COLROW));
-  __m256i remainder_colrow(_mm256_sub_epi16(vdx, quotient_colrow));
-  __m256i quotient_row(_mm256_mulhi_epu16(remainder_colrow, multiplier_row_));
-  quotient_row = _mm256_srl_epi16(quotient_row, nshift_row_);
-  __m256i odd_col(_mm256_and_si256(quotient_row, _mm256_set1_epi16(1)));
-  odd_lay = _mm256_sign_epi16(odd_lay, _mm256_set1_epi64x(-1));
-  odd_lay = _mm256_and_si256(odd_lay, _mm256_set1_epi16(24));
-  odd_col = _mm256_sign_epi16(odd_col, _mm256_set1_epi64x(-1));
-  odd_col = _mm256_and_si256(odd_col, _mm256_set1_epi16(12));
-  nrand = _mm256_add_epi16(nrand, odd_lay);
-  nrand = _mm256_add_epi16(nrand, odd_col);
-  __m256i index(_mm256_cvtepu16_epi32(_mm256_castsi256_si128(nrand)));
-  index = _mm256_i32gather_epi32(offsets_, index, 4);
-  __m256i tar1 = _mm256_add_epi32(_mm256_cvtepu16_epi32(_mm256_castsi256_si128(vdx)), index);
-  index = _mm256_cvtepu16_epi32(_mm256_extractf128_si256(nrand, 1));
-  index =  _mm256_i32gather_epi32(offsets_, index, 4);
-  __m256i tar2 =
-    _mm256_add_epi32(_mm256_cvtepu16_epi32(_mm256_extractf128_si256(vdx, 1)),
-                     index);
-  tar2 = _mm256_packus_epi32(tar1, tar2);
-  return _mm256_permute4x64_epi64(tar2, 216);
-  */
-  //__m256i tar1 = _mm256_i32gather_epi32(offsets_, nrand, 2);
-  // __m256i tar2 = _mm256_i32gather_epi32(offsets_, _mm256_srli_epi16(nrand, 2), 4);
-
-//t_gcc_tcs3: 4.157 s
-__m256i Compartment::get_tars_exp(const __m256i vdx, __m256i nrand) const { 
-  //__m256i rand(nrand);
-  //vdx contains the current Coord of 16 molecules in a box.
-  //Coord is a uint16_t type so it uses up 16 bits.
-  //Coord is made up of x, y, z values with each using up 5 bits (we have one
-  //spare bit).
-  //So the integer value range of each x, y, z is [0, 31].
-  //So 32 is the max side length of the box.
- 
-  //nrand contains 16 random numbers, each using 16 bits with values in the
-  //range [0, 11] for 12 possible target neighbor directions in the HCP lattice.
- 
-  //Later, we will be creating the variable "index" with length 16x16 bits.
-  //Each 16 bit index element will contain odd_col:odd_lay:odd_nrand to get
-  //the element in the lookup table below.
-  //For example if an index element is 1:0:1, then we will need to load the
-  //SIXTH element from the lookup table below. 
-
-  //Now lets set odd_nrand as bit 1 of index. Each index element is 16 bits
-  //length. Bit 1 of each 16 bit element determines if the corresponding nrand
-  //element is odd.
-  __m256i odd_nrand(_mm256_and_si256(nrand, _mm256_set1_epi16(1)));
-
-  //We need to transform nrand from values in [0, 11] to be one of
-  //{0, 6, 12, 18, 24, 30} so that it can be used as shift right logical (srl)
-  //count to select the correct clr after selecting the element from the
-  //lookup table below.
-  //current nrand = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}
-  //set last bit of nrand as 0 to make it an even number
-  nrand = _mm256_xor_si256(nrand, odd_nrand);
-  //nrand = {0, 2, 4, 6, 8, 10}
-  //multipy nrand by 3
-  __m256i nrand2(_mm256_add_epi16(nrand, nrand));
-  //nrand2 = nrand+nrand = {0, 4, 8, 12, 16, 20}
-  nrand = _mm256_add_epi16(nrand2, nrand);
-  //nrand = nrand+nrand2 = {0, 6, 12, 18, 24, 30}
-  //1.66 s
-
-  //Now let's get the odd_lay by loading bit 6 of the vdx and setting it as
-  //bit 2 of odd_lay.
-  __m256i odd_lay(_mm256_srli_epi16(
-     _mm256_and_si256(vdx, _mm256_set1_epi16(32)), 4));
-  //Let's get the odd_col by loading bit 11 of the vdx and setting it as bit 3
-  //of odd_col.
-  __m256i odd_col(_mm256_srli_epi16(
-     _mm256_and_si256(vdx, _mm256_set1_epi16(1024)), 8));
-  //Put odd_col, odd_lay and odd_nrand in index.
-  __m256i index(_mm256_or_si256(odd_nrand, odd_lay));
-  index = _mm256_or_si256(index, odd_col);
-  //1.72 s
-
-  //Set the lookup table.
-  __m256i clr(_mm256_setr_epi32(1292979281,
-      3429915664, 1339051024, 4231036115, 1276988432, 3480243411, 1288723537,
-      4231285776));
-
-  //Get the first 8 target elements from the lookup table using the last 3 bits
-  //(odd_col:odd_lay:odd_nrand) of 32-bit elements of index.
-  //So now we still have not used the the last 3 bits in the upper 16 bits of
-  //32-bit elements of index, we will use them later.
-  __m256i tar1 = _mm256_permutevar8x32_epi32(clr, index);
-  //1.80
-
-  //Srlv will use the lower 5 bits of 32-bit elements of nrand as the count of
-  //shift right logical. The resulting lowest 32 bits contains the actual
-  //offset that will be added with vdx to get the next target Coord.
-  __m256i shift(_mm256_and_si256(nrand, _mm256_set1_epi32(0xffff)));
-  tar1 = _mm256_and_si256(_mm256_srlv_epi32(tar1, shift),
-                          _mm256_set1_epi32(0xffff));
-  //1.91
-
-  //Now let's get the remaining 8 target elements from the lookup table. We
-  //need to look at the upper 16 bits of the 32-bit index elements, so we
-  //shift them right by 16 bits first.
-  __m256i tar2 = _mm256_permutevar8x32_epi32(clr, _mm256_srli_epi32(index, 16));
-  //2.00
-
-  //First shift right the 32-bit elements of nrand by 16 bits to get
-  //the 5 bits that determines the count of shift right logical.
-  //Then after getting the offset, shift it left by 16 bits so that we can
-  //OR the tar2 result with tar1 to get all 16 offsets.
-  tar2 = _mm256_slli_epi32(
-      _mm256_srlv_epi32(tar2, _mm256_srli_epi32(nrand, 16)), 16);
-  //2.14
-
-  //Let's get the offsets
-  __m256i offsets(_mm256_or_si256(tar1, tar2));
-  //2.14
-  
-  //Undo XOR in the offsets by performing XOR with 1 for each col:row:layer
-  //21 dec = 010101 bin
-  offsets = _mm256_xor_si256(offsets, _mm256_set1_epi16(21));
-  //2.2
-
-  //Get row, layer, col in the form of Coord, with each using up 5 bits.
-  __m256i row(_mm256_and_si256(offsets, _mm256_set1_epi16(3)));
-  //12 dec = 1100 bin. The bit position of current layer is 2.
-  //We shift the layer result left by 3 bits to get it to the start position
-  //of y, which is 5.
-  __m256i lay(_mm256_slli_epi16(_mm256_and_si256(offsets,
-                                                 _mm256_set1_epi16(12)), 3));
-  //48 dec = 110000 bin. The bit position of current col is 4.
-  //We shift the col result left by 6 bits to get it to the start bit position
-  //of z, which is 10.
-  __m256i col(_mm256_slli_epi16(_mm256_and_si256(offsets,
-                                                 _mm256_set1_epi16(48)), 6));
-  offsets = _mm256_or_si256(row, lay);
-  //2.48
-  offsets = _mm256_or_si256(offsets, col);
-
-  //Subtract each col, layer and row in vdx by 1 since offsets have already
-  //been added with 1.
-  //1057 dec = 100001000001 bin
-  //For this to work, when populating the box with molecules, we must
-  //make sure the Coord is never at the edge surface. So the values of
-  //x, y, z should never be 0 or the side length.
-  __m256i vdx2 = _mm256_sub_epi16(vdx, _mm256_set1_epi16(1057));
-  //2.50
-
-  //Add offset with the vdx2 to get the final targets.
-  __m256i tars( _mm256_add_epi16(vdx2, offsets));
-
-  //If any of the x, y, z values in tars is 0 or the side length then that
-  //molecule will be moving to the next adjacent box. We need to 
-  //address this next. 
-
-  //Uncomment below if you want to test the correctness of this function:
-  /*
-  for(unsigned i(0); i != 16; ++i)
-    {
-      const bool ol(((Coord*)&vdx)[i].y&1);
-      const bool oc(((Coord*)&vdx)[i].z&1);
-      const bool orand(((uint16_t*)&rand)[i]&1);
-      const int mainIdx(orand*pow(2,0)+ol*pow(2,1)+oc*pow(2,2));
-      const int idx =  mainIdx/2*12+((uint16_t*)&rand)[i];
-      int z1(((Coord*)&tars)[i].z);
-      int y1(((Coord*)&tars)[i].y);
-      int x1(((Coord*)&tars)[i].x);
-      int z2(((Coord*)&vdx)[i].z+off[idx].x);
-      int y2(((Coord*)&vdx)[i].y+off[idx].y);
-      int x2(((Coord*)&vdx)[i].x+off[idx].z);
-      int z3(((Coord*)&vdx)[i].z);
-      int y3(((Coord*)&vdx)[i].y);
-      int x3(((Coord*)&vdx)[i].x);
-      if(x3 != 0 && y3 != 0 && z3 != 0 && x3 != 31 && y3 != 31 && z3 != 31 && 
-         (z1 != z2 || y1 != y2 || x1 != x2))
-        {
-          //cout_binary(tars, "tars");
-          std::cout << "calc tars:" << z1 << "\t" << y1 << "\t" << x1 <<
-            "\texpected tars:" << z2  << " \t" << y2  << " \t" << x2  <<
-            "\tvdx:" << z3 << "\t" << y3  << " \t" << x3 << "\toff:" << 
-            off[idx].x << "\t" << off[idx].y << "\t" << off[idx].z << 
-            "\tidx:" << idx << " mainIdx:" << mainIdx << " rand:" <<
-            ((uint16_t*)&rand)[i]
-            << std::endl; 
-          exit(0);
-        }
-    }
-  */
-  return tars;
-}
-//_mm256_i32gather_epi32 = 2.84 s
-//_mm256_shuffle_epi8 = 1.63 s (so gather takes about 1.2 s)
-//2x_mm256_i32gather_epi32 = 4.1 s (1.63+2*1.2 = 4.1 s)
-
-
 /*
   example:
   ori        (-1, 0, 1) 
@@ -710,7 +342,7 @@ __m256i Compartment::get_tars_exp(const __m256i vdx, __m256i nrand) const {
 
 void Compartment::set_offsets() {
   //col=even, layer=even
-  offsets_ = new int[ADJS*4];
+  offsets_ = new mol_t[ADJS*4];
   offsets_[0] = -1;
   offsets_[1] = 1;
   offsets_[2] = -NUM_ROW-1;

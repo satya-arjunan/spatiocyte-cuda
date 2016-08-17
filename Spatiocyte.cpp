@@ -35,7 +35,7 @@
 #include <VisualLogger.hpp>
 
 #define NUM_BOX 1
-#define BOX_MOL 16
+#define BOX_MOL 1600
 int main() {
   Model model(NUM_BOX);
   Species A("A", BOX_MOL, 1e-12, model, model.get_compartment(),

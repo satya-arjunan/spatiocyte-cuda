@@ -123,6 +123,7 @@ class Random {
   void RandomInit(int seed);
   void RandomInitByArray(int const seeds[], int NumSeeds);
   int IRan(int min, int max);
+  mol_t UmolRan(mol_t min, mol_t max);
   __m256i Ran16();
   int IRanX(int min, int max);
   uint32_t RanUint32_12();

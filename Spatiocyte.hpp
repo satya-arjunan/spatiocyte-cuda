@@ -29,9 +29,9 @@
 //
 
 #define VOXEL_RADIUS 2.5e-9
-#define LENGTH_X 0.115e-5 //ncol
-#define LENGTH_Y 0.115e-5 //nrow
-#define LENGTH_Z 0.115e-5 //nlay
+#define LENGTH_X 0.315e-5 //ncol
+#define LENGTH_Y 0.315e-5 //nrow
+#define LENGTH_Z 0.315e-5 //nlay
 /*
 #define LENGTH_X 0.164e-6 //ncol
 #define LENGTH_Y 0.171e-6 //nrow
