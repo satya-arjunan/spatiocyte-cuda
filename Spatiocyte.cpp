@@ -34,9 +34,11 @@
 #include <Model.hpp>
 #include <VisualLogger.hpp>
 
+#define NUM_BOX 1
+#define BOX_MOL 16
 int main() {
-  Model model(10000);
-  Species A("A", 16, 1e-12, model, model.get_compartment(),
+  Model model(NUM_BOX);
+  Species A("A", BOX_MOL, 1e-12, model, model.get_compartment(),
             model.get_compartment().get_volume_species());
   model.initialize();
   A.populate();

@@ -24,13 +24,13 @@ GUILIBS = $(shell pkg-config --libs gtkmm-2.4 gtkglextmm-x11-1.2 libpng)
 GUIFLAGS = $(shell pkg-config --cflags gtkmm-2.4 gtkglextmm-x11-1.2) -I.
 CPPFLAGS = -DG_DISABLE_DEPRECATED -DGDK_PIXBUF_DISABLE_DEPRECATED -DPNG_SKIP_SETJMP_CHECK
 OBJECTS=${SRC:=.o}
-SPATIOCYTE_CORE = spatiocyte-core
+SPATIOCYTE_CUDA = spatiocyte-cuda
 VISUALIZER = visualizer
 
 
-all: $(SPATIOCYTE_CORE) $(VISUALIZER)
+all: $(SPATIOCYTE_CUDA) $(VISUALIZER)
 
-$(SPATIOCYTE_CORE): $(OBJECTS)
+$(SPATIOCYTE_CUDA): $(OBJECTS)
 		$(CXX) $(CXXFLAGS) $(CXXEFLAGS) -o $@ $(OBJECTS) $(LDFLAGS)
 
 $(VISUALIZER):
@@ -40,4 +40,4 @@ $(VISUALIZER):
 		$(CXX) $(CXXFLAGS) $(IFLAGS) -c -o $@ $<
 
 clean:
-		rm -f $(SPATIOCYTE_CORE) $(VISUALIZER) *.o
+		rm -f $(SPATIOCYTE_CUDA) $(VISUALIZER) *.o

@@ -87,10 +87,10 @@ typedef union
 typedef uint8_t voxel_t;
 #define WORD (sizeof(voxel_t)*8)
 
-typedef int16_t mol_t;
-typedef uint16_t umol_t;
-typedef int32_t mol2_t;
-typedef uint32_t umol2_t;
+typedef int32_t mol_t;
+typedef uint32_t umol_t;
+typedef int64_t mol2_t;
+typedef uint64_t umol2_t;
 
 struct Coord
 {
