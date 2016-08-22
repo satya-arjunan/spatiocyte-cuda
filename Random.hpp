@@ -32,13 +32,24 @@
 #ifndef __Random_hpp
 #define __Random_hpp
 
+#include <random>
 #include <stdint.h>
 #include <thrust/device_vector.h>
 #include <Common.hpp>
 
-class Random{
+
+class Random {
 public:
-  Random(const unsigned, const unsigned, const unsigned, const unsigned);
+  Random() = default;
+  Random(std::mt19937::result_type);
+  unsigned ran(unsigned, unsigned);
+private:        
+  std::mt19937 engine_{std::random_device{}()};
+};
+
+class RandomGPU {
+public:
+  RandomGPU(const unsigned, const unsigned, const unsigned, const unsigned);
   unsigned ran();
 private:
   void initialize();

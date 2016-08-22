@@ -32,7 +32,6 @@
 #ifndef __Species_hpp
 #define __Species_hpp
 
-//#include <RandomLib/Random.hpp>
 #include <Common.hpp>
 #include <Diffuser.hpp>
 #include <Random.hpp>

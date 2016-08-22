@@ -34,6 +34,15 @@
 #include <Common.hpp>
 #include <Random.hpp>
 
+Random::Random(std::mt19937::result_type seed):
+  engine_(seed) {
+}
+
+unsigned Random::ran(const unsigned min, const unsigned max)
+{
+  return std::uniform_int_distribution<unsigned>{min, max}(engine_);
+}
+
 struct generate {
   __host__ __device__ generate(const unsigned _a, const unsigned _b):
     a(_a), b(_b) {;} 
@@ -48,8 +57,8 @@ struct generate {
   unsigned a, b;
 };
 
-Random::Random(const unsigned min, const unsigned max, const unsigned size,
-               const unsigned seed):
+RandomGPU::RandomGPU(const unsigned min, const unsigned max,
+    const unsigned size, const unsigned seed):
   max_(max),
   min_(min),
   size_(size),
@@ -60,7 +69,7 @@ Random::Random(const unsigned min, const unsigned max, const unsigned size,
   initialize();
 }
 
-void Random::initialize() { 
+void RandomGPU::initialize() { 
   cnt_ = 0;
   thrust::counting_iterator<unsigned> begin(seed_);
   thrust::transform(thrust::device, begin, begin+size_, data_.begin(), 
@@ -69,7 +78,7 @@ void Random::initialize() {
   seed_ += size_;
 }
 
-umol_t Random::ran() {
+umol_t RandomGPU::ran() {
   if(cnt_ >= size_) {
     initialize();
   }
