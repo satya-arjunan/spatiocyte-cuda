@@ -25,8 +25,7 @@
 // 
 //END_HEADER
 //
-// 
-//
+// written by Satya Arjunan <satya.arjunan@gmail.com>
 //
 
 #include <math.h>
@@ -56,7 +55,8 @@ Random::Random(const unsigned min, const unsigned max, const unsigned size,
   size_(size),
   cnt_(0),
   seed_(seed),
-  data_(size) {
+  data_(size),
+  hdata_(size) {
   initialize();
 }
 
@@ -65,6 +65,7 @@ void Random::initialize() {
   thrust::counting_iterator<unsigned> begin(seed_);
   thrust::transform(thrust::device, begin, begin+size_, data_.begin(), 
                     generate(min_, max_));
+  thrust::copy(data_.begin(), data_.end(), hdata_.begin());
   seed_ += size_;
 }
 
@@ -72,5 +73,5 @@ umol_t Random::ran() {
   if(cnt_ >= size_) {
     initialize();
   }
-  return data_[cnt_++];
+  return hdata_[cnt_++];
 }

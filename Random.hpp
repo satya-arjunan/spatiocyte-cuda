@@ -48,6 +48,7 @@ private:
   unsigned cnt_;
   unsigned seed_;
   thrust::device_vector<unsigned> data_;
+  thrust::host_vector<unsigned> hdata_;
 };
 
 #endif /* __Random_hpp */ 

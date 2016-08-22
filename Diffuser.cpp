@@ -42,7 +42,7 @@ Diffuser::Diffuser(const double D, Species& species):
   species_id_(species_.get_id()),
   vac_id_(species_.get_vac_id()),
   vac_xor_(species_.get_vac_xor()),
-  rng_(0, 11, 10000, time(0)) {}
+  rng_(0, 11, 10000000, time(0)) {}
 
 void Diffuser::initialize() {
   box_voxels_ = compartment_.get_lattice().get_box_voxels();
@@ -53,7 +53,6 @@ void Diffuser::initialize() {
   std::cout << "one_nbit:" << one_nbit_ << std::endl;
   std::cout << "vac_id:" << vac_id_ << std::endl;
   std::cout << "vac_xor:" << vac_xor_ << std::endl;
-
 }
 
 
