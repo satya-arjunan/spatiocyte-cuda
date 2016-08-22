@@ -57,7 +57,6 @@ private:
   const voxel_t vac_id_;
   const voxel_t vac_xor_;
   Random rng_;
-  //RandomLib::Random rng2_;
   voxel_t nbit_;
   voxel_t one_nbit_;
   unsigned k;

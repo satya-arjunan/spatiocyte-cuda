@@ -33,6 +33,7 @@
 #define __Random_hpp
 
 #include <stdint.h>
+#include <thrust/device_vector.h>
 #include <Common.hpp>
 
 class Random{
@@ -40,13 +41,13 @@ public:
   Random(const unsigned, const unsigned, const unsigned, const unsigned);
   unsigned ran();
 private:
-  initialize(const unsigned);
+  void initialize();
   const unsigned max_;
   const unsigned min_;
   const unsigned size_;
   unsigned cnt_;
   unsigned seed_;
   thrust::device_vector<unsigned> data_;
-}
+};
 
 #endif /* __Random_hpp */ 

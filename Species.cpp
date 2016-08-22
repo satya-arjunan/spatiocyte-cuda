@@ -47,7 +47,7 @@ Species::Species(const std::string name, const unsigned nmols, const double D,
       vac_id_(vacant_.get_id()),
       vac_xor_(vac_id_^id_),
       diffuser_(D, *this),
-      rng_(time(0)) {
+      rng_(0, 10000000, 10000, time(0)) {
   get_box_mols().resize(get_compartment().get_lattice().get_num_box());
 }
 
@@ -102,10 +102,10 @@ umol_t Species::get_random_valid_mol(const unsigned box) {
   return mol;
   */
   std::vector<umol_t>& mols(get_box_mols()[box]);
-  umol_t mol(mols[rng_.IRan(0, mols.size())]);
+  umol_t mol(mols[rng_.ran()]);
   while(get_compartment().get_lattice().get_box_voxels()[box][mol] !=
         get_id()) {
-    mol = mols[rng_.IRan(0, mols.size())];
+    mol = mols[rng_.ran()];
   }
   return mol;
 }

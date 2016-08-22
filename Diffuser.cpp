@@ -42,7 +42,7 @@ Diffuser::Diffuser(const double D, Species& species):
   species_id_(species_.get_id()),
   vac_id_(species_.get_vac_id()),
   vac_xor_(species_.get_vac_xor()),
-  rng_(time(0)) {}
+  rng_(0, 11, 10000, time(0)) {}
 
 void Diffuser::initialize() {
   box_voxels_ = compartment_.get_lattice().get_box_voxels();
@@ -67,7 +67,7 @@ void Diffuser::walk() {
 
 void Diffuser::walk(umol_t* mols, const unsigned size) {
   for (unsigned i(0); i != size; ++i) {
-    umol_t tar(compartment_.get_tar(mols[i], rng_.Ran16_12()));
+    umol_t tar(compartment_.get_tar(mols[i], rng_.ran()));
     for(unsigned j(0); j != size; ++j) {
       if(mols[j] == tar) {
         goto next;

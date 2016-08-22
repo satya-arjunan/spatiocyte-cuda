@@ -29,16 +29,22 @@
 //
 //
 
+#include <math.h>
 #include <curand_kernel.h>
+#include <thrust/execution_policy.h>
 #include <Common.hpp>
 #include <Random.hpp>
 
 struct generate {
-  __host__ __device__ generate(unsigned _a, unsigned _b) : a(_a), b(_b) {;} 
+  __host__ __device__ generate(const unsigned _a, const unsigned _b):
+    a(_a), b(_b) {;} 
   __device__ float operator()(const unsigned n) const {
     curandState s;
     curand_init(n, 0, 0, &s);
-    return curand_uniform(&s);
+    float ranf(curand_uniform(&s));
+    ranf *= (b - a + 0.999999);
+    ranf += a;
+    return (unsigned)truncf(ranf);
   }
   unsigned a, b;
 };
