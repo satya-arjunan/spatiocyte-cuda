@@ -31,6 +31,7 @@
 #include <math.h>
 #include <curand_kernel.h>
 #include <thrust/execution_policy.h>
+#include <thrust/random.h>
 #include <Common.hpp>
 #include <Random.hpp>
 
@@ -43,6 +44,7 @@ unsigned Random::ran(const unsigned min, const unsigned max)
   return std::uniform_int_distribution<unsigned>{min, max}(engine_);
 }
 
+/*
 struct generate {
   __host__ __device__ generate(const unsigned _a, const unsigned _b):
     a(_a), b(_b) {;} 
@@ -53,6 +55,18 @@ struct generate {
     ranf *= (b - a + 0.999999);
     ranf += a;
     return (unsigned)truncf(ranf);
+  }
+  unsigned a, b;
+};
+*/
+
+struct generate {
+  __host__ __device__ generate(const unsigned _a, const unsigned _b):
+    a(_a), b(_b) {;} 
+  __device__ float operator()(const unsigned n) const {
+    thrust::default_random_engine rng(n);
+    thrust::uniform_int_distribution<unsigned> uniform(a, b);
+    return uniform(rng);
   }
   unsigned a, b;
 };
@@ -70,6 +84,7 @@ RandomGPU::RandomGPU(const unsigned min, const unsigned max,
 }
 
 void RandomGPU::initialize() { 
+  std::cout << "initialize:" << size_ << std::endl;
   cnt_ = 0;
   thrust::counting_iterator<unsigned> begin(seed_);
   thrust::transform(thrust::device, begin, begin+size_, data_.begin(), 

@@ -77,6 +77,7 @@ void Species::populate() {
       populate_mol(box, vacant_.get_random_valid_mol(box));
     }
   }
+  diffuser_.populate();
 }
 
 void Species::populate_mol(const unsigned box, const umol_t vdx) {

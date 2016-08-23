@@ -32,6 +32,7 @@
 #ifndef __Diffuser_hpp
 #define __Diffuser_hpp
 
+#include <thrust/device_vector.h>
 #include <Random.hpp>
 #include <Common.hpp>
 
@@ -42,11 +43,9 @@ public:
   ~Diffuser() {}
   void initialize();
   void walk();
-  void walk(voxel_t*, __m256i*, const unsigned);
-  void walk(__m256i*, const unsigned);
-  void walk(umol_t*, const unsigned);
+  void populate();
 private:
-  __m256i cmp_box_edge_tars(const __m256i) const;
+  void set_offsets();
   double D_;
   Species& species_;
   Compartment& compartment_;
@@ -55,10 +54,13 @@ private:
   const voxel_t species_id_;
   const voxel_t vac_id_;
   const voxel_t vac_xor_;
-  RandomGPU rng_;
+  //RandomGPU rng_;
   voxel_t nbit_;
   voxel_t one_nbit_;
-  unsigned k;
+  unsigned seed_;
+  thrust::device_vector<mol_t> offsets_;
+  thrust::device_vector<umol_t> mols_;
+  thrust::device_vector<umol_t> tars_;
 };
 
 #endif /* __Diffuser_hpp */
