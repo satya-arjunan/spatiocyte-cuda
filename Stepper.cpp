@@ -35,7 +35,7 @@
 void Stepper::step()
 {
   diffuser_->walk();
-  //visual_logger_->fire();
+  visual_logger_->fire();
   /*
   time_ += 1;
   if(!(unsigned(time_)%10))

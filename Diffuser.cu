@@ -31,6 +31,7 @@
 #include <time.h>
 #include <thrust/execution_policy.h>
 #include <thrust/random.h>
+#include <curand_kernel.h>
 #include <Diffuser.hpp>
 #include <Compartment.hpp>
 #include <Model.hpp>
@@ -68,6 +69,7 @@ void Diffuser::populate() {
   }
   mols_.resize(box_mols_[0].size());
   thrust::copy(box_mols_[0].begin(), box_mols_[0].end(), mols_.begin());
+  thrust::sort(mols_.begin(), mols_.end());
   //col=even, layer=even
   offsets_[0] = -1;
   offsets_[1] = 1;
@@ -126,11 +128,60 @@ void Diffuser::populate() {
 }
 
 
+__host__ __device__
+unsigned int hash(unsigned int a)
+{
+    a = (a+0x7ed55d16) + (a<<12);
+    a = (a^0xc761c23c) ^ (a>>19);
+    a = (a+0x165667b1) + (a<<5);
+    a = (a+0xd3a2646c) ^ (a<<9);
+    a = (a+0xfd7046c5) + (a<<3);
+    a = (a^0xb55a4f09) ^ (a>>16);
+    return a;
+}
+
+
+/*
+struct generate {
+  __host__ __device__ generate(const unsigned _a, const unsigned _b):
+    a(_a), b(_b) {;} 
+  __device__ float operator()(const unsigned n) const {
+    curandState s;
+    curand_init(n, 0, 0, &s);
+    float ranf(curand_uniform(&s));
+    ranf *= (b - a + 0.999999);
+    ranf += a;
+    return (unsigned)truncf(ranf);
+  }
+  unsigned a, b;
+};
+*/
+
 struct generate {
   __host__ __device__ generate(mol_t* _offsets):
     offsets(_offsets) {} 
   __device__ umol_t operator()(const unsigned n, const umol_t vdx) const {
-    thrust::default_random_engine rng(n);
+    curandState s;
+    curand_init(n, 0, 0, &s);
+    float ranf(curand_uniform(&s)*11.999999);
+    const unsigned rand((unsigned)truncf(ranf));
+    const bool odd_lay((vdx/NUM_COLROW)&1);
+    const bool odd_col((vdx%NUM_COLROW/NUM_ROW)&1);
+    mol2_t val(mol2_t(vdx)+offsets[rand+(24&(-odd_lay))+(12&(-odd_col))]);
+    if(val < 0 || val > NUM_VOXEL) {
+      return vdx;
+    }
+    return val;
+  }
+  mol_t* offsets;
+};
+
+/*
+struct generate {
+  __host__ __device__ generate(mol_t* _offsets):
+    offsets(_offsets) {} 
+  __device__ umol_t operator()(const unsigned n, const umol_t vdx) const {
+    thrust::default_random_engine rng(hash(n));
     thrust::uniform_int_distribution<int> uniform(0, 11);
     const bool odd_lay((vdx/NUM_COLROW)&1);
     const bool odd_col((vdx%NUM_COLROW/NUM_ROW)&1);
@@ -143,6 +194,7 @@ struct generate {
   }
   mol_t* offsets;
 };
+*/
 
 void Diffuser::walk() {
   tars_.resize(mols_.size());
@@ -152,10 +204,14 @@ void Diffuser::walk() {
       mols_.begin(),
       tars_.begin(),
       generate(thrust::raw_pointer_cast(&offsets_[0])));
-      //generate(offsets_.data().get())); /slower
+  thrust::sort(thrust::device, tars_.begin(), tars_.end());
+  thrust::device_vector<umol_t> collisions(mols_.size());
+  thrust::set_intersection(thrust::device, mols_.begin(), mols_.end(), tars_.begin(),
+      tars_.end(), collisions.begin());
+  //if(!collisions.size()) { 
+    thrust::copy(tars_.begin(), tars_.end(), mols_.begin());
+  //}
+  thrust::copy(mols_.begin(), mols_.end(), box_mols_[0].begin());
   seed_ += mols_.size();
-  //std::cout << "mol:" << mols_[0] << " tars:" << tars[0] << std::endl;
-  //tars.clear();
-  //thrust::device_vector<umol_t>().swap(tars);
 }
 
