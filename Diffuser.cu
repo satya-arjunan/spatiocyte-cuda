@@ -70,10 +70,11 @@ void Diffuser::populate() {
   }
   mols_.resize(box_mols_[0].size());
   thrust::copy(box_mols_[0].begin(), box_mols_[0].end(), mols_.begin());
-  for(unsigned i(0); i != mols_.size(); ++i) {
-    lattice_[i] = false;
-  }
-
+  thrust::permutation_iterator<thrust::device_vector<voxel_t>::iterator,
+    thrust::device_vector<umol_t>::iterator> occupieds(lattice_.begin(),
+        mols_.begin());
+  thrust::fill_n(thrust::device, occupieds, mols_.size(), false);
+  std::cout << "end" << std::endl;
   //col=even, layer=even
   offsets_[0] = -1;
   offsets_[1] = 1;
@@ -181,17 +182,15 @@ struct generate {
 };
 
 struct update {
-  __host__ __device__ update(voxel_t* _lattice):
+  __host__ __device__ update(const voxel_t* _lattice):
     lattice(_lattice) {} 
   __device__ umol_t operator()(const umol_t tar, const umol_t mol) const {
     if(lattice[tar]) {
-      lattice[tar] = false;
-      lattice[mol] = true;
       return tar;
     }
     return mol;
   }
-  voxel_t* lattice;
+  const voxel_t* lattice;
 };
 
 void Diffuser::walk() {
@@ -207,11 +206,63 @@ void Diffuser::walk() {
       tars_.begin(),
       tars_.end(),
       mols_.begin(),
-      mols_.begin(),
+      tars_.begin(),
       update(thrust::raw_pointer_cast(&lattice_[0])));
+  thrust::permutation_iterator<thrust::device_vector<voxel_t>::iterator,
+    thrust::device_vector<umol_t>::iterator> vacants(lattice_.begin(),
+        mols_.begin());
+  thrust::fill_n(thrust::device, vacants, mols_.size(), true);
+  thrust::permutation_iterator<thrust::device_vector<voxel_t>::iterator,
+    thrust::device_vector<umol_t>::iterator> occupieds(lattice_.begin(),
+        tars_.begin());
+  thrust::fill_n(thrust::device, occupieds, tars_.size(), false);
+  thrust::copy(tars_.begin(), tars_.end(), mols_.begin());
   //thrust::copy(mols_.begin(), mols_.end(), box_mols_[0].begin());
   seed_ += mols_.size();
 }
+
+/*
+//Full collision check with lattice: 0.3 s (1,600,000 molecules, 42.5 s)
+struct update {
+  __host__ __device__ update(const voxel_t* _lattice):
+    lattice(_lattice) {} 
+  __device__ umol_t operator()(const umol_t tar, const umol_t mol) const {
+    if(lattice[tar]) {
+      return tar;
+    }
+    return mol;
+  }
+  const voxel_t* lattice;
+};
+
+void Diffuser::walk() {
+  const size_t size(mols_.size());
+  tars_.resize(size);
+  thrust::transform(thrust::device, 
+      thrust::counting_iterator<unsigned>(seed_),
+      thrust::counting_iterator<unsigned>(seed_+size),
+      mols_.begin(),
+      tars_.begin(),
+      generate(thrust::raw_pointer_cast(&offsets_[0])));
+  thrust::transform(thrust::device, 
+      tars_.begin(),
+      tars_.end(),
+      mols_.begin(),
+      tars_.begin(),
+      update(thrust::raw_pointer_cast(&lattice_[0])));
+  thrust::permutation_iterator<thrust::device_vector<voxel_t>::iterator,
+    thrust::device_vector<umol_t>::iterator> vacants(lattice_.begin(),
+        mols_.begin());
+  thrust::fill_n(thrust::device, vacants, mols_.size(), true);
+  thrust::permutation_iterator<thrust::device_vector<voxel_t>::iterator,
+    thrust::device_vector<umol_t>::iterator> occupieds(lattice_.begin(),
+        tars_.begin());
+  thrust::fill_n(thrust::device, occupieds, tars_.size(), false);
+  thrust::copy(tars_.begin(), tars_.end(), mols_.begin());
+  //thrust::copy(mols_.begin(), mols_.end(), box_mols_[0].begin());
+  seed_ += mols_.size();
+}
+*/
 
 /*
 //Partial collision check with lattice: 0.2 s
