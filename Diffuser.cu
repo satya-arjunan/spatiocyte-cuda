@@ -181,7 +181,7 @@ struct generate {
 };
 
 struct update {
-  __host__ __device__ update(bool* _lattice):
+  __host__ __device__ update(voxel_t* _lattice):
     lattice(_lattice) {} 
   __device__ umol_t operator()(const umol_t tar, const umol_t mol) const {
     if(lattice[tar]) {
@@ -191,7 +191,7 @@ struct update {
     }
     return mol;
   }
-  bool* lattice;
+  voxel_t* lattice;
 };
 
 void Diffuser::walk() {
