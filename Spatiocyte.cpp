@@ -35,7 +35,7 @@
 #include <VisualLogger.hpp>
 
 #define NUM_BOX 1
-#define BOX_MOL 16000000
+#define BOX_MOL 160000
 int main() {
   std::cout << "start" << std::endl;
   Model model(NUM_BOX);
@@ -66,7 +66,7 @@ int main() {
       boost::posix_time::microsec_clock::universal_time()); 
   std::cout << "11" << std::endl;
   //model.run(0.1);
-  model.run(0.005);
+  model.run(0.05);
   std::cout << "12" << std::endl;
   boost::posix_time::ptime end(
       boost::posix_time::microsec_clock::universal_time());
