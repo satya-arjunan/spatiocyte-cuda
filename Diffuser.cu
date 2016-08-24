@@ -177,6 +177,65 @@ struct generate {
   mol_t* offsets;
 };
 
+struct update {
+  __host__ __device__ update(const size_t _size, const umol_t* _mols):
+    size(_size), mols(_mols) {} 
+  __device__ umol_t operator()(const mol_t tar, const umol_t mol) const {
+    for(unsigned i(0); i != size; ++i) {
+      if(tar == mols[i]) {
+        return mol;
+      }
+    }
+    return tar;
+  }
+  const size_t size;
+  const umol_t* mols;
+};
+
+void Diffuser::walk() {
+  const size_t size(mols_.size());
+  tars_.resize(size);
+  thrust::transform(thrust::device, 
+      thrust::counting_iterator<unsigned>(seed_),
+      thrust::counting_iterator<unsigned>(seed_+size),
+      mols_.begin(),
+      tars_.begin(),
+      generate(thrust::raw_pointer_cast(&offsets_[0])));
+  thrust::transform(thrust::device, 
+      tars_.begin(),
+      tars_.end(),
+      mols_.begin(),
+      tars_.begin(),
+      update(size, thrust::raw_pointer_cast(&mols_[0])));
+  thrust::copy(tars_.begin(), tars_.end(), mols_.begin());
+  //thrust::copy(mols_.begin(), mols_.end(), box_mols_[0].begin());
+  seed_ += mols_.size();
+}
+
+/*
+//Full collision check using molecule list only: 4.3s
+void Diffuser::walk() {
+  const size_t size(mols_.size());
+  tars_.resize(size);
+  thrust::transform(thrust::device, 
+      thrust::counting_iterator<unsigned>(seed_),
+      thrust::counting_iterator<unsigned>(seed_+size),
+      mols_.begin(),
+      tars_.begin(),
+      generate(thrust::raw_pointer_cast(&offsets_[0])));
+  thrust::transform(thrust::device, 
+      tars_.begin(),
+      tars_.end(),
+      mols_.begin(),
+      tars_.begin(),
+      update(size, thrust::raw_pointer_cast(&mols_[0])));
+  thrust::copy(tars_.begin(), tars_.end(), mols_.begin());
+  //thrust::copy(mols_.begin(), mols_.end(), box_mols_[0].begin());
+  seed_ += mols_.size();
+}
+*/
+
+
 /*
 struct generate {
   __host__ __device__ generate(mol_t* _offsets):
@@ -197,6 +256,9 @@ struct generate {
 };
 */
 
+
+/*
+//Collisions not check, with intersection: 7s
 void Diffuser::walk() {
   tars_.resize(mols_.size());
   thrust::transform(thrust::device, 
@@ -215,4 +277,21 @@ void Diffuser::walk() {
   //thrust::copy(mols_.begin(), mols_.end(), box_mols_[0].begin());
   seed_ += mols_.size();
 }
+*/
 
+/*
+//Sequential original 10.5 s
+void Diffuser::walk(umol_t* mols, const unsigned size) {
+  for (unsigned i(0); i != size; ++i) {
+    umol_t tar(compartment_.get_tar(mols[i], rng_.Ran16_12()));
+    for(unsigned j(0); j != size; ++j) {
+      if(mols[j] == tar) {
+        goto next;
+      }
+    }
+    mols[i] = tar;
+next:
+    continue;
+  }
+}
+*/
