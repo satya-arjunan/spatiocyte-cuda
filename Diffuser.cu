@@ -49,7 +49,7 @@ Diffuser::Diffuser(const double D, Species& species):
   seed_(0),
   offsets_(ADJS*4),
   mols_(0),
-  lattice_(NUM_VOXEL, true) {
+  lattice_(NUM_VOXEL, false) {
     std::cout << "mols size:" << mols_.size() << std::endl;
   }
 
@@ -73,7 +73,7 @@ void Diffuser::populate() {
   thrust::permutation_iterator<thrust::device_vector<voxel_t>::iterator,
     thrust::device_vector<umol_t>::iterator> occupieds(lattice_.begin(),
         mols_.begin());
-  thrust::fill_n(thrust::device, occupieds, mols_.size(), false);
+  thrust::fill_n(thrust::device, occupieds, mols_.size(), true);
   std::cout << "end" << std::endl;
   //col=even, layer=even
   offsets_[0] = -1;
@@ -181,19 +181,16 @@ struct generate {
   mol_t* offsets;
 };
 
-struct is_vacant {
-  __host__ __device__
-    bool operator()(const voxel_t voxel) {
-    return (bool)voxel;
+struct is_occupied {
+  __device__ bool operator()(const voxel_t voxel) {
+    return ((bool)voxel);
   }
 };
 
 struct update {
-  __host__ __device__
-    umol_t operator()(const voxel_t tar,
-      const umol_t mol) const {
+  __device__ umol_t operator()(const umol_t mol) const {
     return mol;
-    }
+  }
 };
 
 void Diffuser::walk() {
@@ -208,42 +205,87 @@ void Diffuser::walk() {
   thrust::permutation_iterator<thrust::device_vector<voxel_t>::iterator,
     thrust::device_vector<umol_t>::iterator> stencil(lattice_.begin(),
         tars_.begin());
-  thrust::transform_if(thrust::device, 
-      tars_.begin(),
-      tars_.end(),
+  thrust::transform_if(
       mols_.begin(),
+      mols_.end(),
       stencil,
       tars_.begin(),
       update(),
-      is_vacant());
+      is_occupied());
   thrust::permutation_iterator<thrust::device_vector<voxel_t>::iterator,
     thrust::device_vector<umol_t>::iterator> vacants(lattice_.begin(),
         mols_.begin());
-  thrust::fill_n(thrust::device, vacants, size, true);
+  thrust::fill_n(thrust::device, vacants, size, false);
   thrust::permutation_iterator<thrust::device_vector<voxel_t>::iterator,
     thrust::device_vector<umol_t>::iterator> occupieds(lattice_.begin(),
         tars_.begin());
-  thrust::fill_n(thrust::device, occupieds, size, false);
+  thrust::fill_n(thrust::device, occupieds, size, true);
   thrust::copy(tars_.begin(), tars_.end(), mols_.begin());
   //thrust::copy(mols_.begin(), mols_.end(), box_mols_[0].begin());
   seed_ += size;
 }
 
 /*
+//Simplified full collision with transform_if: very small performance
+//improvement
+struct is_occupied {
+  __device__ bool operator()(const voxel_t voxel) {
+    return ((bool)voxel);
+  }
+};
+
+struct update {
+  __device__ umol_t operator()(const umol_t mol) const {
+    return mol;
+  }
+};
+
+void Diffuser::walk() {
+  const size_t size(mols_.size());
+  tars_.resize(size);
+  thrust::transform(thrust::device, 
+      thrust::counting_iterator<unsigned>(seed_),
+      thrust::counting_iterator<unsigned>(seed_+size),
+      mols_.begin(),
+      tars_.begin(),
+      generate(thrust::raw_pointer_cast(&offsets_[0])));
+  thrust::permutation_iterator<thrust::device_vector<voxel_t>::iterator,
+    thrust::device_vector<umol_t>::iterator> stencil(lattice_.begin(),
+        tars_.begin());
+  thrust::transform_if(
+      mols_.begin(),
+      mols_.end(),
+      stencil,
+      tars_.begin(),
+      update(),
+      is_occupied());
+  thrust::permutation_iterator<thrust::device_vector<voxel_t>::iterator,
+    thrust::device_vector<umol_t>::iterator> vacants(lattice_.begin(),
+        mols_.begin());
+  thrust::fill_n(thrust::device, vacants, size, false);
+  thrust::permutation_iterator<thrust::device_vector<voxel_t>::iterator,
+    thrust::device_vector<umol_t>::iterator> occupieds(lattice_.begin(),
+        tars_.begin());
+  thrust::fill_n(thrust::device, occupieds, size, true);
+  thrust::copy(tars_.begin(), tars_.end(), mols_.begin());
+  //thrust::copy(mols_.begin(), mols_.end(), box_mols_[0].begin());
+  seed_ += size;
+}
+*/
+
+
+/*
 //Full collision lattice with transform_if: same performance
 struct is_vacant {
-  __host__ __device__
-    bool operator()(const voxel_t voxel) {
+  __device__ bool operator()(const voxel_t voxel) {
     return (bool)voxel;
   }
 };
 
 struct update {
-  __host__ __device__
-    umol_t operator()(const voxel_t tar,
-      const umol_t mol) const {
+  __device__ umol_t operator()(const voxel_t tar, const umol_t mol) const {
     return mol;
-    }
+  }
 };
 
 void Diffuser::walk() {
