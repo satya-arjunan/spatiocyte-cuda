@@ -49,7 +49,7 @@ Diffuser::Diffuser(const double D, Species& species):
   seed_(0),
   offsets_(ADJS*4),
   mols_(0),
-  collisions_(0) {
+  lattice_(NUM_VOXEL, true) {
     std::cout << "mols size:" << mols_.size() << std::endl;
   }
 
@@ -70,7 +70,10 @@ void Diffuser::populate() {
   }
   mols_.resize(box_mols_[0].size());
   thrust::copy(box_mols_[0].begin(), box_mols_[0].end(), mols_.begin());
-  thrust::sort(mols_.begin(), mols_.end());
+  for(unsigned i(0); i != mols_.size(); ++i) {
+    lattice_[i] = false;
+  }
+
   //col=even, layer=even
   offsets_[0] = -1;
   offsets_[1] = 1;
@@ -178,18 +181,17 @@ struct generate {
 };
 
 struct update {
-  __host__ __device__ update(const size_t _size, const umol_t* _mols):
-    size(_size), mols(_mols) {} 
-  __device__ umol_t operator()(const mol_t tar, const umol_t mol) const {
-    for(unsigned i(0); i != size; ++i) {
-      if(tar == mols[i]) {
-        return mol;
-      }
+  __host__ __device__ update(bool* _lattice):
+    lattice(_lattice) {} 
+  __device__ umol_t operator()(const umol_t tar, const umol_t mol) const {
+    if(lattice[tar]) {
+      lattice[tar] = false;
+      lattice[mol] = true;
+      return tar;
     }
-    return tar;
+    return mol;
   }
-  const size_t size;
-  const umol_t* mols;
+  bool* lattice;
 };
 
 void Diffuser::walk() {
@@ -205,15 +207,66 @@ void Diffuser::walk() {
       tars_.begin(),
       tars_.end(),
       mols_.begin(),
-      tars_.begin(),
-      update(size, thrust::raw_pointer_cast(&mols_[0])));
-  thrust::copy(tars_.begin(), tars_.end(), mols_.begin());
+      mols_.begin(),
+      update(thrust::raw_pointer_cast(&lattice_[0])));
   //thrust::copy(mols_.begin(), mols_.end(), box_mols_[0].begin());
   seed_ += mols_.size();
 }
 
 /*
+//Partial collision check with lattice: 0.2 s
+struct update {
+  __host__ __device__ update(bool* _lattice):
+    lattice(_lattice) {} 
+  __device__ umol_t operator()(const umol_t tar, const umol_t mol) const {
+    if(lattice[tar]) {
+      lattice[tar] = false;
+      lattice[mol] = true;
+      return tar;
+    }
+    return mol;
+  }
+  bool* lattice;
+};
+
+void Diffuser::walk() {
+  const size_t size(mols_.size());
+  tars_.resize(size);
+  thrust::transform(thrust::device, 
+      thrust::counting_iterator<unsigned>(seed_),
+      thrust::counting_iterator<unsigned>(seed_+size),
+      mols_.begin(),
+      tars_.begin(),
+      generate(thrust::raw_pointer_cast(&offsets_[0])));
+  thrust::transform(thrust::device, 
+      tars_.begin(),
+      tars_.end(),
+      mols_.begin(),
+      mols_.begin(),
+      update(thrust::raw_pointer_cast(&lattice_[0])));
+  //thrust::copy(mols_.begin(), mols_.end(), box_mols_[0].begin());
+  seed_ += mols_.size();
+}
+*/
+
+/*
 //Full collision check using molecule list only: 4.3s
+
+struct update {
+  __host__ __device__ update(const size_t _size, const umol_t* _mols):
+    size(_size), mols(_mols) {} 
+  __device__ umol_t operator()(const umol_t tar, const umol_t mol) const {
+    for(unsigned i(0); i != size; ++i) {
+      if(tar == mols[i]) {
+        return mol;
+      }
+    }
+    return tar;
+  }
+  const size_t size;
+  const umol_t* mols;
+};
+
 void Diffuser::walk() {
   const size_t size(mols_.size());
   tars_.resize(size);
