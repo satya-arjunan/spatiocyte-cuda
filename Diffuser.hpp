@@ -61,6 +61,7 @@ private:
   thrust::device_vector<mol_t> offsets_;
   thrust::device_vector<umol_t> mols_;
   thrust::device_vector<umol_t> tars_;
+  thrust::device_vector<umol_t> collisions_;
 };
 
 #endif /* __Diffuser_hpp */

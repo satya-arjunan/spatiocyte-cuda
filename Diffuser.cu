@@ -48,7 +48,8 @@ Diffuser::Diffuser(const double D, Species& species):
   //rng_(0, 11, 1000000*bool(D), time(0)),
   seed_(0),
   offsets_(ADJS*4),
-  mols_(0) {
+  mols_(0),
+  collisions_(0) {
     std::cout << "mols size:" << mols_.size() << std::endl;
   }
 
@@ -205,13 +206,13 @@ void Diffuser::walk() {
       tars_.begin(),
       generate(thrust::raw_pointer_cast(&offsets_[0])));
   thrust::sort(thrust::device, tars_.begin(), tars_.end());
-  thrust::device_vector<umol_t> collisions(mols_.size());
-  thrust::set_intersection(thrust::device, mols_.begin(), mols_.end(), tars_.begin(),
-      tars_.end(), collisions.begin());
+  collisions_.resize(mols_.size());
+  thrust::set_intersection(thrust::device, mols_.begin(), mols_.end(),
+      tars_.begin(), tars_.end(), collisions_.begin());
   //if(!collisions.size()) { 
     thrust::copy(tars_.begin(), tars_.end(), mols_.begin());
   //}
-  thrust::copy(mols_.begin(), mols_.end(), box_mols_[0].begin());
+  //thrust::copy(mols_.begin(), mols_.end(), box_mols_[0].begin());
   seed_ += mols_.size();
 }
 
