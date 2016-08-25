@@ -49,41 +49,6 @@ class VisualLogger;
 
 #define ADJS 12
 
-typedef union
-{
-  __m128i m128i[4];
-  __m256i m256i[2];
-  uint8_t uint8[64];
-  uint16_t uint16[32];
-  uint32_t uint32[16];
-  int8_t int8[64];
-  int16_t int16[32];
-  int32_t int32[16];
-} union512;
-
-typedef union
-{
-  __m128i m128i[2];
-  __m256i m256i;
-  uint8_t uint8[32];
-  uint16_t uint16[16];
-  uint32_t uint32[8];
-  int8_t int8[32];
-  int16_t int16[16];
-  int32_t int32[8];
-} union256;
-
-typedef union
-{
-  __m128i m128i;
-  uint8_t uint8[16];
-  uint16_t uint16[8];
-  uint32_t uint32[4];
-  int8_t int8[16];
-  int16_t int16[8];
-  int32_t int32[4];
-} union128;
-
 typedef uint8_t voxel_t;
 #define WORD (sizeof(voxel_t)*8)
 
@@ -93,8 +58,6 @@ typedef int32_t mol_t;
 typedef uint32_t umol_t;
 typedef int64_t mol2_t;
 typedef uint64_t umol2_t;
-typedef __int128 mol3_t;
-typedef unsigned __int128 umol3_t;
 
 struct Coord
 {

@@ -36,33 +36,19 @@
 
 class Lattice {
  public: 
-  Lattice(const unsigned, const Vector<unsigned>&, const unsigned);
+  Lattice(const unsigned, const Vector<unsigned>&);
   ~Lattice() {}
   void initialize();
-  bool is_mol_at_box_edge(const umol_t) const;
-  unsigned get_num_box() const;
-  unsigned get_num_box_voxel() const;
-  unsigned get_num_voxel() const;
-  unsigned box_coord_to_mol(const unsigned, const Coord) const;
-  unsigned box_mol_to_mol(const unsigned, const umol_t) const;
-  unsigned coord_to_mol(const Vector<unsigned>&) const;
-  umol_t box_coord_to_box_mol(const Coord) const;
-  Coord box_mol_to_box_coord(const umol_t) const;
-  Vector<unsigned> box_mol_to_coord(const umol_t) const;
-  Vector<unsigned> box_to_coord(const unsigned) const;
+  unsigned get_num_voxel() const; 
+  bool is_mol_at_edge(const umol_t) const;
+  umol_t coord_to_mol(const Vector<unsigned>&) const;
+  Vector<unsigned> mol_to_coord(const umol_t) const;
   const Vector<unsigned>& get_dimensions() const;
-  const Vector<unsigned>& get_box_dimensions() const;
-  const Vector<unsigned>& get_box_voxel_dimensions() const;
   voxel_t* get_voxels();
-  voxel_t** get_box_voxels();
  private:
-  const unsigned num_box_;
-  const Vector<unsigned> box_dimensions_;
-  const Vector<unsigned> box_voxel_dimensions_;
+  unsigned num_voxel_;
   const Vector<unsigned> dimensions_;
-  const unsigned num_box_voxel_;
   voxel_t* voxels_;
-  voxel_t** box_voxels_;
 };
 
 #endif /* __Lattice_hpp */

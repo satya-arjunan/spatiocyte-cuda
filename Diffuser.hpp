@@ -49,14 +49,9 @@ private:
   double D_;
   Species& species_;
   Compartment& compartment_;
-  std::vector<std::vector<umol_t> >& box_mols_;
-  voxel_t** box_voxels_;
+  std::vector<umol_t>& dmols_;
   const voxel_t species_id_;
   const voxel_t vac_id_;
-  const voxel_t vac_xor_;
-  //RandomGPU rng_;
-  voxel_t nbit_;
-  voxel_t one_nbit_;
   unsigned seed_;
   thrust::device_vector<mol_t> offsets_;
   thrust::device_vector<umol_t> mols_;

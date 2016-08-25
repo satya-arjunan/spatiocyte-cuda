@@ -41,40 +41,29 @@ Diffuser::Diffuser(const double D, Species& species):
   D_(D),
   species_(species),
   compartment_(species_.get_compartment()),
-  box_mols_(species_.get_box_mols()),
+  dmols_(species_.get_mols()),
   species_id_(species_.get_id()),
   vac_id_(species_.get_vac_id()),
-  vac_xor_(species_.get_vac_xor()),
-  //rng_(0, 11, 1000000*bool(D), time(0)),
   seed_(0),
   offsets_(ADJS*4),
   mols_(0),
   lattice_(NUM_VOXEL, false) {
-    std::cout << "mols size:" << mols_.size() << std::endl;
-  }
+}
 
 void Diffuser::initialize() {
-  box_voxels_ = compartment_.get_lattice().get_box_voxels();
-  nbit_ = species_.get_compartment().get_model().get_nbit();
-  one_nbit_ = pow(2, nbit_)-1;
-  std::cout << species_.get_name_id() << std::endl;
-  std::cout << "nbit:" << nbit_ << std::endl;
-  std::cout << "one_nbit:" << one_nbit_ << std::endl;
-  std::cout << "vac_id:" << vac_id_ << std::endl;
-  std::cout << "vac_xor:" << vac_xor_ << std::endl;
+  std::cout << "init diffuser of:" << species_.get_name_id() << std::endl;
 }
 
 void Diffuser::populate() {
   if(!D_) { 
     return;
   }
-  mols_.resize(box_mols_[0].size());
-  thrust::copy(box_mols_[0].begin(), box_mols_[0].end(), mols_.begin());
+  mols_.resize(dmols_.size());
+  thrust::copy(dmols_.begin(), dmols_.end(), mols_.begin());
   thrust::permutation_iterator<thrust::device_vector<voxel_t>::iterator,
     thrust::device_vector<umol_t>::iterator> occupieds(lattice_.begin(),
         mols_.begin());
   thrust::fill_n(thrust::device, occupieds, mols_.size(), true);
-  std::cout << "end" << std::endl;
   //col=even, layer=even
   offsets_[0] = -1;
   offsets_[1] = 1;
@@ -221,7 +210,7 @@ void Diffuser::walk() {
         tars_.begin());
   thrust::fill_n(thrust::device, occupieds, size, true);
   thrust::copy(tars_.begin(), tars_.end(), mols_.begin());
-  //thrust::copy(mols_.begin(), mols_.end(), box_mols_[0].begin());
+  //thrust::copy(mols_.begin(), mols_.end(), dmols_.begin());
   seed_ += size;
 }
 

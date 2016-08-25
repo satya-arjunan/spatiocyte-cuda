@@ -33,13 +33,11 @@
 #include <Model.hpp>
 #include <math.h>
 
-Model::Model(const unsigned num_box)
-    : num_box_(num_box),
-      nbit_(rint(log(SPECIES_MAX)/log(2.0))),
-      compartment_("root", LENGTH_X, LENGTH_Y, LENGTH_Z, *this, num_box) {}
+Model::Model()
+    : compartment_("root", LENGTH_X, LENGTH_Y, LENGTH_Z, *this) {}
       
 void Model::initialize() {
-  std::cout << "nbit:" << nbit_ << " size:" << species_.size() << std::endl;
+  std::cout << "species size:" << species_.size() << std::endl;
   compartment_.initialize();
   for (unsigned i(0), n(species_.size()); i != n; ++i) {
       species_[i]->initialize();
@@ -51,10 +49,6 @@ void Model::run(const double interval) {
   for (unsigned i(0); i != steps; ++i) {
       stepper_.step();
     }
-}
-
-unsigned Model::get_nbit() const {
-  return nbit_;
 }
 
 unsigned Model::push_species(Species& species) {

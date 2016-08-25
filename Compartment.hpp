@@ -39,21 +39,19 @@
 
 #define HCP_X double(VOXEL_RADIUS*1.732050807568877)
 #define HCP_Z double(VOXEL_RADIUS*1.632993161855452)
-#define NUM_COL umol_t(LENGTH_X/HCP_X+3)
-#define NUM_LAY umol_t(LENGTH_Z/HCP_Z+3)
+#define NUM_COL mol_t(LENGTH_X/HCP_X+3)
+#define NUM_LAY mol_t(LENGTH_Z/HCP_Z+3)
 //#define NUM_ROW unsigned(LENGTH_Y/VOXEL_RADIUS/2+3) //correct version
-#define NUM_ROW umol_t(LENGTH_Y/VOXEL_RADIUS/2+2)
-#define NUM_COLROW umol_t(NUM_COL*NUM_ROW)
+#define NUM_ROW mol_t(LENGTH_Y/VOXEL_RADIUS/2+2)
+#define NUM_COLROW mol_t(NUM_COL*NUM_ROW)
 #define NUM_COLROWROW umol_t(NUM_COLROW*NUM_ROW)
 #define NUM_VOXEL umol_t(NUM_COLROW*NUM_LAY)
 
 class Compartment { 
  public: 
-  Compartment(std::string, const double, const double, const double, Model&,
-      const unsigned);
+  Compartment(std::string, const double, const double, const double, Model&);
   ~Compartment() {}
   void initialize();
-  umol_t get_tar(const umol_t, const unsigned) const;
   Vector<double> get_center() const;
   const Vector<double>& get_dimensions() const;
   Species& get_surface_species();
@@ -73,10 +71,7 @@ class Compartment {
   const Vector<double> dimensions_;
   Species volume_species_;
   Species surface_species_;
-  voxel_t nbit_;
-  voxel_t sur_xor_;
   mol_t* offsets_;
-  CoordInt* off;
 };
 
 #endif /* __Compartment_hpp */
