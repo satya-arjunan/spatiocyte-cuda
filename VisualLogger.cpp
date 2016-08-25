@@ -115,7 +115,7 @@ void VisualLogger::log_structure_species()
           Species& species(*species_[i]);
           //The species index in the process:
           logfile_.write((char*)(&i), sizeof(i)); 
-          const std::vector<unsigned>& mols(species.get_mols());
+          const std::vector<unsigned>& mols(species.get_host_mols());
           const unsigned size(mols.size());
           logfile_.write((char*)(&size), sizeof(size)); 
           for(unsigned j(0); j != mols.size(); ++j)
@@ -151,7 +151,7 @@ void VisualLogger::log_mols(const unsigned index)
       return;
     }
   logfile_.write((char*)(&index), sizeof(index));
-  const std::vector<unsigned>& mols(species.get_mols());
+  const std::vector<unsigned>& mols(species.get_host_mols());
   const unsigned size(mols.size());
   logfile_.write((char*)(&size), sizeof(size)); 
   for(unsigned i(0); i != mols.size(); ++i)

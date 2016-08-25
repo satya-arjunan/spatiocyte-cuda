@@ -32,6 +32,7 @@
 #ifndef __Species_hpp
 #define __Species_hpp
 
+#include <thrust/device_vector.h>
 #include <Common.hpp>
 #include <Diffuser.hpp>
 #include <Random.hpp>
@@ -49,13 +50,14 @@ public:
   bool is_root_structure_species() const;
   voxel_t get_id() const;
   voxel_t get_vac_id() const;
-  umol_t get_random_valid_mol();
+  umol_t get_random_valid_host_mol();
   Diffuser& get_diffuser();
   Species& get_vacant();
   Compartment& get_compartment();
   const std::string& get_name() const;
   const std::string get_name_id() const;
-  std::vector<umol_t>& get_mols();
+  std::vector<umol_t>& get_host_mols();
+  thrust::device_vector<umol_t>& get_mols();
 private:
   const std::string get_init_name(const std::string) const;
 private:
@@ -66,7 +68,8 @@ private:
   const bool is_structure_species_;
   const voxel_t id_;
   const voxel_t vac_id_;
-  std::vector<umol_t> mols_;
+  std::vector<umol_t> host_mols_;
+  thrust::device_vector<umol_t> mols_;
   Diffuser diffuser_;
   Random rng_;
 };

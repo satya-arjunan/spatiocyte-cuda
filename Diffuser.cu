@@ -27,7 +27,7 @@
 //
 // written by Satya Arjunan <satya.arjunan@gmail.com>
 //
-
+//'iptables -I INPUT -p tcp --dport 1022 -j ACCEPT'
 #include <time.h>
 #include <thrust/execution_policy.h>
 #include <thrust/random.h>
@@ -41,12 +41,11 @@ Diffuser::Diffuser(const double D, Species& species):
   D_(D),
   species_(species),
   compartment_(species_.get_compartment()),
-  dmols_(species_.get_mols()),
+  mols_(species_.get_mols()),
   species_id_(species_.get_id()),
   vac_id_(species_.get_vac_id()),
   seed_(0),
   offsets_(ADJS*4),
-  mols_(0),
   lattice_(NUM_VOXEL, false) {
 }
 
@@ -54,12 +53,14 @@ void Diffuser::initialize() {
   std::cout << "init diffuser of:" << species_.get_name_id() << std::endl;
 }
 
+double Diffuser::getD() {
+  return D_;
+}
+
 void Diffuser::populate() {
   if(!D_) { 
     return;
   }
-  mols_.resize(dmols_.size());
-  thrust::copy(dmols_.begin(), dmols_.end(), mols_.begin());
   thrust::permutation_iterator<thrust::device_vector<voxel_t>::iterator,
     thrust::device_vector<umol_t>::iterator> occupieds(lattice_.begin(),
         mols_.begin());
@@ -152,7 +153,7 @@ struct generate {
 */
 
 struct generate {
-  __host__ __device__ generate(mol_t* _offsets):
+  __host__ __device__ generate(const mol_t* _offsets):
     offsets(_offsets) {} 
   __device__ umol_t operator()(const unsigned n, const umol_t vdx) const {
     curandState s;
@@ -167,7 +168,7 @@ struct generate {
     }
     return val;
   }
-  mol_t* offsets;
+  const mol_t* offsets;
 };
 
 struct is_occupied {
@@ -210,7 +211,6 @@ void Diffuser::walk() {
         tars_.begin());
   thrust::fill_n(thrust::device, occupieds, size, true);
   thrust::copy(tars_.begin(), tars_.end(), mols_.begin());
-  //thrust::copy(mols_.begin(), mols_.end(), dmols_.begin());
   seed_ += size;
 }
 

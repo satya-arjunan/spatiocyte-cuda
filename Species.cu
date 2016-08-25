@@ -55,21 +55,25 @@ void Species::initialize() {
 
 void Species::populate() {
   for(unsigned i(0); i != init_nmols_; ++i) {
-    populate_mol(vacant_.get_random_valid_mol());
+    populate_mol(vacant_.get_random_valid_host_mol());
   }
   diffuser_.populate();
 }
 
 void Species::populate_mol(const umol_t vdx) {
   get_compartment().get_lattice().get_voxels()[vdx] = get_id();
-  get_mols().push_back(vdx);
+  if(diffuser_.getD()) {
+    get_mols().push_back(vdx);
+  }
+  else {
+    get_host_mols().push_back(vdx);
+  }
 }
 
-umol_t Species::get_random_valid_mol() {
-  std::vector<umol_t>& mols(get_mols());
+umol_t Species::get_random_valid_host_mol() {
+  std::vector<umol_t>& mols(get_host_mols());
   umol_t mol(mols[rng_.ran(0, mols.size())]);
-  while(get_compartment().get_lattice().get_voxels()[mol] !=
-        get_id()) {
+  while(get_compartment().get_lattice().get_voxels()[mol] != get_id()) {
     mol = mols[rng_.ran(0, mols.size())];
   }
   return mol;
@@ -121,6 +125,14 @@ const std::string Species::get_init_name(const std::string name) const {
   return std::string(vacant_.get_name()+"/"+name);
 }
 
-std::vector<umol_t>& Species::get_mols() {
+std::vector<umol_t>& Species::get_host_mols() {
+  if(diffuser_.getD()) {
+    host_mols_.resize(mols_.size());
+    thrust::copy(mols_.begin(), mols_.end(), host_mols_.begin());
+  }
+  return host_mols_;
+}
+
+thrust::device_vector<umol_t>& Species::get_mols() {
   return mols_;
 }
