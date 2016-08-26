@@ -31,6 +31,9 @@
 #include <iostream>
 #include <string>
 #include <time.h>
+#include <thrust/execution_policy.h>
+#include <thrust/random.h>
+#include <curand_kernel.h>
 #include <Species.hpp>
 #include <Compartment.hpp>
 #include <Model.hpp>
@@ -40,6 +43,7 @@ Species::Species(const std::string name, const unsigned nmols, const double D,
     const bool is_structure_species):
   compartment_(compartment),
   vacant_(vacant),
+  voxels_(compartment_.get_lattice().get_voxels()),
   name_(get_init_name(name)),
   init_nmols_(nmols),
   is_structure_species_(is_structure_species),
@@ -53,30 +57,58 @@ void Species::initialize() {
   diffuser_.initialize();
 }
 
-void Species::populate() {
-  for(unsigned i(0); i != init_nmols_; ++i) {
-    populate_mol(vacant_.get_random_valid_host_mol());
+struct populate_lattice {
+  __host__ __device__ populate_lattice(const voxel_t _id, const umol_t _size, 
+      voxel_t* _voxels):
+    id(_id),
+    size(_size),
+    voxels(_voxels) {} 
+  __device__ umol_t operator()(const unsigned n) const {
+    curandState s;
+    curand_init(n, 0, 0, &s);
+    float ranf(curand_uniform(&s)*(size + 0.999999));
+    unsigned rand((unsigned)truncf(ranf));
+    while(voxels[rand]) {
+      ranf = curand_uniform(&s)*(size + 0.999999);
+      rand = (unsigned)truncf(ranf);
+    }
+    voxels[rand] = id;
+    return rand;
   }
+  const voxel_t id;
+  const umol_t size;
+  voxel_t* voxels;
+};
+
+void Species::populate() {
+  mols_.resize(init_nmols_);
+  thrust::transform(thrust::device, 
+      thrust::counting_iterator<unsigned>(0),
+      thrust::counting_iterator<unsigned>(init_nmols_),
+      mols_.begin(),
+      populate_lattice(get_id(), voxels_.size(),
+        thrust::raw_pointer_cast(&voxels_[0])));
   diffuser_.populate();
 }
 
-void Species::populate_mol(const umol_t vdx) {
-  get_compartment().get_lattice().get_voxels()[vdx] = get_id();
+void Species::populate_in_lattice() {
+  mols_.resize(host_mols_.size());
+  thrust::copy(host_mols_.begin(), host_mols_.end(), mols_.begin());
+  thrust::permutation_iterator<thrust::device_vector<voxel_t>::iterator,
+    thrust::device_vector<umol_t>::iterator> population(
+        voxels_.begin(), mols_.begin());
+  thrust::fill_n(thrust::device, population, mols_.size(), get_id());
   if(diffuser_.getD()) {
-    get_mols().push_back(vdx);
-  }
-  else {
-    get_host_mols().push_back(vdx);
+    host_mols_.clear();
+    std::vector<umol_t>().swap(host_mols_);
+  } else {
+    mols_.clear();
+    thrust::device_vector<umol_t>().swap(mols_);
   }
 }
 
-umol_t Species::get_random_valid_host_mol() {
-  std::vector<umol_t>& mols(get_host_mols());
-  umol_t mol(mols[rng_.ran(0, mols.size())]);
-  while(get_compartment().get_lattice().get_voxels()[mol] != get_id()) {
-    mol = mols[rng_.ran(0, mols.size())];
-  }
-  return mol;
+void Species::push_host_mol(const umol_t vdx) {
+  host_mols_.push_back(vdx);
 }
 
 bool Species::is_structure_species() const {
@@ -112,10 +144,12 @@ const std::string& Species::get_name() const {
 }
 
 const std::string Species::get_name_id() const {
+  /*
   std::stringstream sid;
   sid << (unsigned)get_id();
   return std::string(get_name()+":"+sid.str());
-  //return std::string(get_name()+":id:"+std::to_string(get_id())); c++11
+  */
+  return std::string(get_name()+":id:"+std::to_string(get_id())); // c++11
 }
 
 const std::string Species::get_init_name(const std::string name) const {

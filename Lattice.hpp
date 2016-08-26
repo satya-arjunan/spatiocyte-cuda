@@ -32,11 +32,12 @@
 #ifndef __Lattice_hpp
 #define __Lattice_hpp
 
+#include <thrust/device_vector.h>
 #include <Common.hpp>
 
 class Lattice {
  public: 
-  Lattice(const unsigned, const Vector<unsigned>&);
+  Lattice(const Vector<unsigned>&);
   ~Lattice() {}
   void initialize();
   unsigned get_num_voxel() const; 
@@ -44,11 +45,10 @@ class Lattice {
   umol_t coord_to_mol(const Vector<unsigned>&) const;
   Vector<unsigned> mol_to_coord(const umol_t) const;
   const Vector<unsigned>& get_dimensions() const;
-  voxel_t* get_voxels();
+  thrust::device_vector<voxel_t>& get_voxels();
  private:
-  unsigned num_voxel_;
   const Vector<unsigned> dimensions_;
-  voxel_t* voxels_;
+  thrust::device_vector<voxel_t> voxels_;
 };
 
 #endif /* __Lattice_hpp */

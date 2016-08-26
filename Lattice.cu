@@ -31,15 +31,14 @@
 #include <cmath>
 #include <cstring>
 #include <Lattice.hpp>
+#include <Compartment.hpp>
 
-Lattice::Lattice(const unsigned num_voxel, const Vector<unsigned>& dimensions):
-  num_voxel_(num_voxel),
+Lattice::Lattice(const Vector<unsigned>& dimensions):
+  voxels_(NUM_VOXEL, 0),
   dimensions_(dimensions) {
 }
 
 void Lattice::initialize() {
-  voxels_ = new voxel_t[get_num_voxel()];
-  memset(get_voxels(), 0, sizeof(voxel_t)*get_num_voxel());
   std::cout << "num_x:" << get_dimensions().x << " num_y:" << 
     get_dimensions().y << " num_z:" << get_dimensions().z  << " num_voxel:" <<
     get_num_voxel() << " memory:" << get_num_voxel()*sizeof(voxel_t)/
@@ -47,7 +46,7 @@ void Lattice::initialize() {
 }
 
 unsigned Lattice::get_num_voxel() const {
-  return num_voxel_;
+  return voxels_.size();
 }
 
 bool Lattice::is_mol_at_edge(const umol_t mol) const {
@@ -75,6 +74,6 @@ const Vector<unsigned>& Lattice::get_dimensions() const {
   return dimensions_;
 }
 
-voxel_t* Lattice::get_voxels() {
+thrust::device_vector<voxel_t>& Lattice::get_voxels() {
   return voxels_;
 }

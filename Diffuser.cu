@@ -42,11 +42,11 @@ Diffuser::Diffuser(const double D, Species& species):
   species_(species),
   compartment_(species_.get_compartment()),
   mols_(species_.get_mols()),
+  voxels_(species_.get_compartment().get_lattice().get_voxels()),
   species_id_(species_.get_id()),
   vac_id_(species_.get_vac_id()),
   seed_(0),
-  offsets_(ADJS*4),
-  lattice_(NUM_VOXEL, false) {
+  offsets_(ADJS*4) {
 }
 
 void Diffuser::initialize() {
@@ -61,10 +61,6 @@ void Diffuser::populate() {
   if(!D_) { 
     return;
   }
-  thrust::permutation_iterator<thrust::device_vector<voxel_t>::iterator,
-    thrust::device_vector<umol_t>::iterator> occupieds(lattice_.begin(),
-        mols_.begin());
-  thrust::fill_n(thrust::device, occupieds, mols_.size(), true);
   //col=even, layer=even
   offsets_[0] = -1;
   offsets_[1] = 1;
@@ -193,7 +189,7 @@ void Diffuser::walk() {
       tars_.begin(),
       generate(thrust::raw_pointer_cast(&offsets_[0])));
   thrust::permutation_iterator<thrust::device_vector<voxel_t>::iterator,
-    thrust::device_vector<umol_t>::iterator> stencil(lattice_.begin(),
+    thrust::device_vector<umol_t>::iterator> stencil(voxels_.begin(),
         tars_.begin());
   thrust::transform_if(
       mols_.begin(),
@@ -203,11 +199,11 @@ void Diffuser::walk() {
       update(),
       is_occupied());
   thrust::permutation_iterator<thrust::device_vector<voxel_t>::iterator,
-    thrust::device_vector<umol_t>::iterator> vacants(lattice_.begin(),
+    thrust::device_vector<umol_t>::iterator> vacants(voxels_.begin(),
         mols_.begin());
   thrust::fill_n(thrust::device, vacants, size, false);
   thrust::permutation_iterator<thrust::device_vector<voxel_t>::iterator,
-    thrust::device_vector<umol_t>::iterator> occupieds(lattice_.begin(),
+    thrust::device_vector<umol_t>::iterator> occupieds(voxels_.begin(),
         tars_.begin());
   thrust::fill_n(thrust::device, occupieds, size, true);
   thrust::copy(tars_.begin(), tars_.end(), mols_.begin());

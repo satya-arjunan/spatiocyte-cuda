@@ -39,7 +39,7 @@ Compartment::Compartment(std::string name, const double len_x,
     const double len_y, const double len_z, Model& model):
   name_(name),
   model_(model),
-  lattice_(NUM_VOXEL, Vector<unsigned>(NUM_COL, NUM_ROW, NUM_LAY)),
+  lattice_(Vector<unsigned>(NUM_COL, NUM_ROW, NUM_LAY)),
   dimensions_(get_lattice().get_dimensions().x*2*VOXEL_RADIUS, 
               get_lattice().get_dimensions().y*2*VOXEL_RADIUS,
               get_lattice().get_dimensions().z*2*VOXEL_RADIUS),
@@ -152,30 +152,33 @@ Lattice& Compartment::get_lattice() {
 }
 
 void Compartment::set_volume_structure() {
+  /*
   for(umol_t i(0); i != get_lattice().get_num_voxel(); ++i) {
-    get_volume_species().populate_mol(i);
+    get_volume_species().push_host_mol(i);
   }
+  */
 }
 
 void Compartment::set_surface_structure() {
   for (umol_t i(0); i != NUM_COLROW; ++i) {
-    get_surface_species().populate_mol(i);
-    get_surface_species().populate_mol(NUM_VOXEL-1-i);
+    get_surface_species().push_host_mol(i);
+    get_surface_species().push_host_mol(NUM_VOXEL-1-i);
   }
   for (umol_t i(1); i != NUM_LAY-1; ++i) {
     //layer_row yz-plane
     for (umol_t j(0); j != NUM_ROW; ++j) {
-      get_surface_species().populate_mol(i*NUM_COLROW+j);
-      get_surface_species().populate_mol(i*NUM_COLROW+j+NUM_ROW*
+      get_surface_species().push_host_mol(i*NUM_COLROW+j);
+      get_surface_species().push_host_mol(i*NUM_COLROW+j+NUM_ROW*
                                          (NUM_COL-1));
     }
     //layer_col xz-plane
     for (umol_t j(1); j != NUM_COL-1; ++j) {
-      get_surface_species().populate_mol(i*NUM_COLROW+j*NUM_ROW);
-      get_surface_species().populate_mol(i*NUM_COLROW+j*NUM_ROW+
+      get_surface_species().push_host_mol(i*NUM_COLROW+j*NUM_ROW);
+      get_surface_species().push_host_mol(i*NUM_COLROW+j*NUM_ROW+
                                          NUM_ROW-1);
     }
   }
+  get_surface_species().populate_in_lattice();
 }
 
 

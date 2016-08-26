@@ -45,12 +45,12 @@ public:
   ~Species() {}
   void initialize();
   void populate();
-  void populate_mol(const umol_t);
+  void populate_in_lattice();
+  void push_host_mol(const umol_t);
   bool is_structure_species() const;
   bool is_root_structure_species() const;
   voxel_t get_id() const;
   voxel_t get_vac_id() const;
-  umol_t get_random_valid_host_mol();
   Diffuser& get_diffuser();
   Species& get_vacant();
   Compartment& get_compartment();
@@ -63,6 +63,7 @@ private:
 private:
   Compartment& compartment_;
   Species& vacant_;
+  thrust::device_vector<voxel_t>& voxels_;
   const std::string name_;
   const unsigned init_nmols_;
   const bool is_structure_species_;
