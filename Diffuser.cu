@@ -27,7 +27,7 @@
 //
 // written by Satya Arjunan <satya.arjunan@gmail.com>
 //
-//'iptables -I INPUT -p tcp --dport 1022 -j ACCEPT'
+
 #include <time.h>
 #include <thrust/execution_policy.h>
 #include <thrust/random.h>
