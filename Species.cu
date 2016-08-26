@@ -87,7 +87,6 @@ void Species::populate() {
       mols_.begin(),
       populate_lattice(get_id(), voxels_.size(),
         thrust::raw_pointer_cast(&voxels_[0])));
-  diffuser_.populate();
 }
 
 void Species::populate_in_lattice() {

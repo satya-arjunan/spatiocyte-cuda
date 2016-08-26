@@ -43,10 +43,10 @@ Diffuser::Diffuser(const double D, Species& species):
   compartment_(species_.get_compartment()),
   mols_(species_.get_mols()),
   voxels_(species_.get_compartment().get_lattice().get_voxels()),
+  offsets_(species_.get_compartment().get_offsets()),
   species_id_(species_.get_id()),
   vac_id_(species_.get_vac_id()),
-  seed_(0),
-  offsets_(ADJS*4) {
+  seed_(0) {
 }
 
 void Diffuser::initialize() {
@@ -56,97 +56,6 @@ void Diffuser::initialize() {
 double Diffuser::getD() {
   return D_;
 }
-
-void Diffuser::populate() {
-  if(!D_) { 
-    return;
-  }
-  //col=even, layer=even
-  offsets_[0] = -1;
-  offsets_[1] = 1;
-  offsets_[2] = -NUM_ROW-1;
-  offsets_[3] = -NUM_ROW;
-  offsets_[4] = NUM_ROW-1;
-  offsets_[5] = NUM_ROW;
-  offsets_[6] = -NUM_COLROW-NUM_ROW;
-  offsets_[7] = -NUM_COLROW-1;
-  offsets_[8] = -NUM_COLROW;
-  offsets_[9] = NUM_COLROW-NUM_ROW;
-  offsets_[10] = NUM_COLROW-1;
-  offsets_[11] = NUM_COLROW;
-
-  //col=even, layer=odd +24 = %layer*24
-  offsets_[24] = -1;
-  offsets_[25] = 1;
-  offsets_[26] = -NUM_ROW;
-  offsets_[27] = -NUM_ROW+1;
-  offsets_[28] = NUM_ROW;
-  offsets_[29] = NUM_ROW+1;
-  offsets_[30] = -NUM_COLROW;
-  offsets_[31] = -NUM_COLROW+1;
-  offsets_[32] = -NUM_COLROW+NUM_ROW;
-  offsets_[33] = NUM_COLROW;
-  offsets_[34] = NUM_COLROW+1;
-  offsets_[35] = NUM_COLROW+NUM_ROW;
-
-  //col=odd, layer=even +12 = %col*12
-  offsets_[12] = -1;
-  offsets_[13] = 1;
-  offsets_[14] = -NUM_ROW;
-  offsets_[15] = -NUM_ROW+1;
-  offsets_[16] = NUM_ROW;
-  offsets_[17] = NUM_ROW+1;
-  offsets_[18] = -NUM_COLROW-NUM_ROW;
-  offsets_[19] = -NUM_COLROW;
-  offsets_[20] = -NUM_COLROW+1;
-  offsets_[21] = NUM_COLROW-NUM_ROW;
-  offsets_[22] = NUM_COLROW;
-  offsets_[23] = NUM_COLROW+1;
-
-  //col=odd, layer=odd +36 = %col*12 + %layer*24
-  offsets_[36] = -1;
-  offsets_[37] = 1;
-  offsets_[38] = -NUM_ROW-1;
-  offsets_[39] = -NUM_ROW;
-  offsets_[40] = NUM_ROW-1;
-  offsets_[41] = NUM_ROW;
-  offsets_[42] = -NUM_COLROW-1;
-  offsets_[43] = -NUM_COLROW; //a
-  offsets_[44] = -NUM_COLROW+NUM_ROW;
-  offsets_[45] = NUM_COLROW-1;
-  offsets_[46] = NUM_COLROW;
-  offsets_[47] = NUM_COLROW+NUM_ROW;
-}
-
-
-__host__ __device__
-unsigned int hash(unsigned int a)
-{
-    a = (a+0x7ed55d16) + (a<<12);
-    a = (a^0xc761c23c) ^ (a>>19);
-    a = (a+0x165667b1) + (a<<5);
-    a = (a+0xd3a2646c) ^ (a<<9);
-    a = (a+0xfd7046c5) + (a<<3);
-    a = (a^0xb55a4f09) ^ (a>>16);
-    return a;
-}
-
-
-/*
-struct generate {
-  __host__ __device__ generate(const unsigned _a, const unsigned _b):
-    a(_a), b(_b) {;} 
-  __device__ float operator()(const unsigned n) const {
-    curandState s;
-    curand_init(n, 0, 0, &s);
-    float ranf(curand_uniform(&s));
-    ranf *= (b - a + 0.999999);
-    ranf += a;
-    return (unsigned)truncf(ranf);
-  }
-  unsigned a, b;
-};
-*/
 
 struct generate {
   __host__ __device__ generate(const mol_t* _offsets):

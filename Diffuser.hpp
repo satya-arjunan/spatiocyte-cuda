@@ -42,7 +42,6 @@ public:
   ~Diffuser() {}
   void initialize();
   void walk();
-  void populate();
   double getD();
 private:
   void set_offsets();
@@ -51,10 +50,10 @@ private:
   Compartment& compartment_;
   thrust::device_vector<umol_t>& mols_;
   thrust::device_vector<voxel_t>& voxels_;
+  thrust::device_vector<mol_t>& offsets_;
   const voxel_t species_id_;
   const voxel_t vac_id_;
   unsigned seed_;
-  thrust::device_vector<mol_t> offsets_;
   thrust::device_vector<umol_t> tars_;
 };
 

@@ -59,6 +59,7 @@ class Compartment {
   Model& get_model();
   const std::string& get_name() const;
   Lattice& get_lattice();
+  thrust::device_vector<mol_t>& get_offsets();
  private:
   void set_volume_structure();
   void set_surface_structure();
@@ -67,11 +68,11 @@ class Compartment {
  private:
   const std::string name_;
   Model& model_;
+  thrust::device_vector<mol_t> offsets_;
   Lattice lattice_;
   const Vector<double> dimensions_;
   Species volume_species_;
   Species surface_species_;
-  mol_t* offsets_;
 };
 
 #endif /* __Compartment_hpp */

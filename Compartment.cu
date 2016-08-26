@@ -38,6 +38,7 @@ Compartment::Compartment(std::string name, const double len_x,
     const double len_y, const double len_z, Model& model):
   name_(name),
   model_(model),
+  offsets_(ADJS*4),
   lattice_(Vector<unsigned>(NUM_COL, NUM_ROW, NUM_LAY)),
   dimensions_(get_lattice().get_dimensions().x*2*VOXEL_RADIUS, 
               get_lattice().get_dimensions().y*2*VOXEL_RADIUS,
@@ -63,9 +64,12 @@ void Compartment::initialize() {
   set_surface_structure();
 }
 
+thrust::device_vector<mol_t>& Compartment::get_offsets() {
+  return offsets_;
+}
+
 void Compartment::set_offsets() {
   //col=even, layer=even
-  offsets_ = new mol_t[ADJS*4];
   offsets_[0] = -1;
   offsets_[1] = 1;
   offsets_[2] = -NUM_ROW-1;
