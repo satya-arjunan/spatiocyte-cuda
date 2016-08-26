@@ -44,8 +44,8 @@
 //#define NUM_ROW unsigned(LENGTH_Y/VOXEL_RADIUS/2+3) //correct version
 #define NUM_ROW mol_t(LENGTH_Y/VOXEL_RADIUS/2+2)
 #define NUM_COLROW mol_t(NUM_COL*NUM_ROW)
-#define NUM_COLROWROW umol_t(NUM_COLROW*NUM_ROW)
-#define NUM_VOXEL umol_t(NUM_COLROW*NUM_LAY)
+#define NUM_COLROWROW umol_t(umol_t(NUM_COLROW)*NUM_ROW)
+#define NUM_VOXEL umol_t(umol_t(NUM_COLROW)*NUM_LAY)
 
 class Compartment { 
  public: 

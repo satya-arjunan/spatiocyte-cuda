@@ -67,11 +67,11 @@ void VisualLogger::push_species(Species& species)
 
 void VisualLogger::initialize_log()
 {
-  const unsigned latticeType(0); //HCP
+  const umol_t latticeType(0); //HCP
   logfile_.write((char*)(&latticeType), sizeof(latticeType));
-  const unsigned meanCount(0);
+  const umol_t meanCount(0);
   logfile_.write((char*)(&meanCount), sizeof(meanCount));
-  const unsigned startCoord(0);
+  const umol_t startCoord(0);
   logfile_.write((char*)(&startCoord), sizeof(startCoord));
   const Vector<unsigned>& dimensions(
       compartment_.get_lattice().get_dimensions());
@@ -85,19 +85,19 @@ void VisualLogger::initialize_log()
   logfile_.write((char*)(&real_dimensions.x), sizeof(real_dimensions.x));
   logfile_.write((char*)(&real_dimensions.z), sizeof(real_dimensions.z));
   logfile_.write((char*)(&real_dimensions.y), sizeof(real_dimensions.y));
-  const unsigned latticeSpSize(species_.size());
+  const umol_t latticeSpSize(species_.size());
   logfile_.write((char*)(&latticeSpSize), sizeof(latticeSpSize));
-  const unsigned polymerSize(0);
+  const umol_t polymerSize(0);
   logfile_.write((char*)(&polymerSize), sizeof(polymerSize));
-  const unsigned reservedSize(0);
+  const umol_t reservedSize(0);
   logfile_.write((char*)(&reservedSize), sizeof(reservedSize));
-  const unsigned offLatticeSpSize(0);
+  const umol_t offLatticeSpSize(0);
   logfile_.write((char*)(&offLatticeSpSize), sizeof(offLatticeSpSize));
   logfile_.write((char*)(&marker_), sizeof(marker_));
   logfile_.write((char*)(&voxel_radius), sizeof(voxel_radius));
-  for(unsigned i(0); i != species_.size(); ++i)
+  for(umol_t i(0); i != species_.size(); ++i)
     {
-      const unsigned stringSize(species_[i]->get_name_id().size());
+      const umol_t stringSize(species_[i]->get_name_id().size());
       logfile_.write((char*)(&stringSize), sizeof(stringSize));
       logfile_.write(species_[i]->get_name_id().c_str(), stringSize);
       logfile_.write((char*)(&voxel_radius), sizeof(voxel_radius));
@@ -108,19 +108,19 @@ void VisualLogger::log_structure_species()
 {
   const double currentTime(stepper_.get_current_time());
   logfile_.write((char*)(&currentTime), sizeof(currentTime));
-  for(unsigned i(0); i != species_.size(); ++i)
+  for(umol_t i(0); i != species_.size(); ++i)
     {
       if(species_[i]->is_structure_species())
         {
           Species& species(*species_[i]);
           //The species index in the process:
           logfile_.write((char*)(&i), sizeof(i)); 
-          const std::vector<unsigned>& mols(species.get_host_mols());
-          const unsigned size(mols.size());
+          const std::vector<umol_t>& mols(species.get_host_mols());
+          const umol_t size(mols.size());
           logfile_.write((char*)(&size), sizeof(size)); 
-          for(unsigned j(0); j != mols.size(); ++j)
+          for(umol_t j(0); j != mols.size(); ++j)
             {
-              unsigned mol(mols[j]);
+              umol_t mol(mols[j]);
               logfile_.write((char*)(&mol), sizeof(mol));
             }
         }
@@ -133,7 +133,7 @@ void VisualLogger::log_species()
 {
   const double currentTime(stepper_.get_current_time());
   logfile_.write((char*)(&currentTime), sizeof(currentTime));
-  for(unsigned i(0); i != species_.size(); ++i)
+  for(umol_t i(0); i != species_.size(); ++i)
     {
       log_mols(i);
     }
@@ -141,7 +141,7 @@ void VisualLogger::log_species()
   logfile_.write((char*)(&marker_), sizeof(marker_));
 }
 
-void VisualLogger::log_mols(const unsigned index)
+void VisualLogger::log_mols(const umol_t index)
 {
   Species& species(*species_[index]);
   //No need to log lipid or non diffusing vacant molecules since we have
@@ -151,12 +151,12 @@ void VisualLogger::log_mols(const unsigned index)
       return;
     }
   logfile_.write((char*)(&index), sizeof(index));
-  const std::vector<unsigned>& mols(species.get_host_mols());
-  const unsigned size(mols.size());
+  const std::vector<umol_t>& mols(species.get_host_mols());
+  const umol_t size(mols.size());
   logfile_.write((char*)(&size), sizeof(size)); 
-  for(unsigned i(0); i != mols.size(); ++i)
+  for(umol_t i(0); i != mols.size(); ++i)
     {
-      unsigned mol(mols[i]);
+      umol_t mol(mols[i]);
       logfile_.write((char*)(&mol), sizeof(mol));
     }
 }  

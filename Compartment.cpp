@@ -47,8 +47,8 @@ Compartment::Compartment(std::string name, const double len_x,
 }
 
 void Compartment::initialize() {
-  long num_voxel(long(NUM_COL)*NUM_ROW*NUM_LAY);
-  long max_umol_t(pow(2,sizeof(umol_t)*8));
+  double num_voxel(double(NUM_COL)*NUM_ROW*NUM_LAY);
+  double max_umol_t(pow(2,sizeof(umol_t)*8));
   if(num_voxel > max_umol_t)
     {
       std::cout << "Number of voxels:" << num_voxel <<
