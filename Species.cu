@@ -49,8 +49,7 @@ Species::Species(const std::string name, const unsigned nmols, const double D,
   is_structure_species_(is_structure_species),
   id_(model.push_species(*this)),
   vac_id_(vacant_.get_id()),
-  diffuser_(D, *this),
-  rng_(time(0)) {
+  diffuser_(D, *this) {
 }
 
 void Species::initialize() {

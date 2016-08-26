@@ -33,7 +33,6 @@
 #define __Diffuser_hpp
 
 #include <thrust/device_vector.h>
-#include <Random.hpp>
 #include <Common.hpp>
 
 class Diffuser

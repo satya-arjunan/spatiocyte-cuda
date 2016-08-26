@@ -9,9 +9,7 @@ SRC=\
 		Lattice\
 		Species\
 		Diffuser\
-		VisualLogger\
-		Random\
-		Optimization
+		VisualLogger
 
 IFLAGS = -I. -I$(HOME)/root/include -I/usr/include/x86_64-linux-gnu/c++/5.2.1
 LDFLAGS = # -L$(HOME)/root/lib -lRandom

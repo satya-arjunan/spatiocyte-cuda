@@ -32,7 +32,6 @@
 #include <Compartment.hpp>
 #include <Species.hpp>
 #include <Model.hpp>
-#include <Optimization.hpp>
 
 
 Compartment::Compartment(std::string name, const double len_x,

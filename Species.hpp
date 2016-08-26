@@ -35,7 +35,6 @@
 #include <thrust/device_vector.h>
 #include <Common.hpp>
 #include <Diffuser.hpp>
-#include <Random.hpp>
 
 class Species
 { 
@@ -72,7 +71,6 @@ private:
   std::vector<umol_t> host_mols_;
   thrust::device_vector<umol_t> mols_;
   Diffuser diffuser_;
-  Random rng_;
 };
 
 #endif /* __Species_hpp */
