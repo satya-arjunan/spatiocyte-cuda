@@ -49,7 +49,7 @@ class VisualLogger;
 
 #define ADJS 12
 
-typedef uint8_t voxel_t;
+typedef uint32_t voxel_t;
 #define WORD (sizeof(voxel_t)*8)
 
 

@@ -68,23 +68,17 @@ struct generate {
     const bool odd_lay((vdx/NUM_COLROW)&1);
     const bool odd_col((vdx%NUM_COLROW/NUM_ROW)&1);
     mol2_t val(mol2_t(vdx)+offsets[rand+(24&(-odd_lay))+(12&(-odd_col))]);
-    if(val < 0 || val > NUM_VOXEL) {
-      val = vdx;
-    }
     /*
-    const int res(atomicCAS(voxels[val], 0, 1));
-    if(res = 0) {
-      voxels[vdx] = false;
-    }
-    */
-    if(!voxels[val]) {
-      voxels[val] = true;
-      voxels[vdx] = false;
-      return val;
-    }
-    else {
+    if(val < 0 || val > NUM_VOXEL) {
       return vdx;
     }
+    */
+    const voxel_t res(atomicCAS(voxels+val, 0, 1));
+    if(res == 0) {
+      voxels[vdx] = 0;
+      return val;
+    }
+    return vdx;
   }
   const mol_t* offsets;
   voxel_t* voxels;
