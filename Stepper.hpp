@@ -41,11 +41,13 @@ public:
    ~Stepper() {}
   void step();
   void set_diffuser(Diffuser&);
+  void add_diffuser(Diffuser&);
   void set_visual_logger(VisualLogger&);
   double get_current_time() const;
 private:
   double time_;
   Diffuser* diffuser_;
+  std::vector<Diffuser*> diffusers_;
   VisualLogger* visual_logger_;
 };
 

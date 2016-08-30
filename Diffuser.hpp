@@ -54,7 +54,6 @@ private:
   const voxel_t species_id_;
   const voxel_t vac_id_;
   unsigned seed_;
-  thrust::device_vector<umol_t> tars_;
 };
 
 #endif /* __Diffuser_hpp */

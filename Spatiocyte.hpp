@@ -40,4 +40,3 @@
 //#define LENGTH_X 1e-6 //ncol
 //#define LENGTH_Y 1e-6 //nrow
 //#define LENGTH_Z 1e-6 //nlay
-#define SPECIES_MAX 3

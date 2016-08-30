@@ -53,13 +53,6 @@ void Model::run(const double interval) {
 
 unsigned Model::push_species(Species& species) {
   species_.push_back(&species);
-  if (species_.size() > SPECIES_MAX) {
-      std::stringstream error_message;
-      error_message << "\nSPECIES_MAX is set to " << SPECIES_MAX <<
-        ", which is less than the actual size " << species_.size() << 
-        ".\nSet SPECIES_MAX to " << species_.size() << ".";
-      throw std::runtime_error(error_message.str());
-    }
   return species_.size()-1;
 }
 

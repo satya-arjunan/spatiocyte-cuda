@@ -32,10 +32,12 @@
 #include <Diffuser.hpp>
 #include <VisualLogger.hpp>
 
-void Stepper::step()
-{
-  diffuser_->walk();
-  //visual_logger_->fire();
+void Stepper::step() {
+  for(unsigned i(0); i != diffusers_.size(); ++i) {
+    diffusers_[i]->walk();
+  }
+  //diffuser_->walk();
+  visual_logger_->fire();
   /*
   time_ += 1;
   if(!(unsigned(time_)%10))
@@ -45,18 +47,19 @@ void Stepper::step()
     */
 }
 
-void Stepper::set_diffuser(Diffuser& diffuser)
-{
+void Stepper::set_diffuser(Diffuser& diffuser) {
   diffuser_ = &diffuser;
 }
 
-void Stepper::set_visual_logger(VisualLogger& visual_logger)
-{
+void Stepper::add_diffuser(Diffuser& diffuser) {
+  diffusers_.push_back(&diffuser);
+}
+
+void Stepper::set_visual_logger(VisualLogger& visual_logger) {
   visual_logger_ = &visual_logger;
 }
 
-double Stepper::get_current_time() const
-{
+double Stepper::get_current_time() const {
   return time_;
 }
 
