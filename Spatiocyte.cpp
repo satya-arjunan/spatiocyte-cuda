@@ -36,7 +36,7 @@
 
 int main() {
   Model model;
-  Species A("A", 160000, 1e-12, model, model.get_compartment(),
+  Species A("A", 1600000, 1e-12, model, model.get_compartment(),
             model.get_compartment().get_volume_species());
   model.initialize();
   A.populate();
