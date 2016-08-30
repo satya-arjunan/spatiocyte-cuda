@@ -58,6 +58,49 @@ double Diffuser::getD() {
 }
 
 struct generate {
+  __host__ __device__ generate(const voxel_t _vac_id, const voxel_t _species_id,
+      const mol_t* _offsets, voxel_t* _voxels):
+    vac_id(_vac_id),
+    species_id(_species_id),
+    offsets(_offsets),
+    voxels(_voxels) {} 
+  __device__ umol_t operator()(const unsigned n, const umol_t vdx) const {
+    curandState s;
+    curand_init(n, 0, 0, &s);
+    float ranf(curand_uniform(&s)*11.999999);
+    const unsigned rand((unsigned)truncf(ranf));
+    const bool odd_lay((vdx/NUM_COLROW)&1);
+    const bool odd_col((vdx%NUM_COLROW/NUM_ROW)&1);
+    mol2_t val(mol2_t(vdx)+offsets[rand+(24&(-odd_lay))+(12&(-odd_col))]);
+    const voxel_t res(atomicCAS(voxels+val, vac_id, species_id));
+    //If not occupied:
+    if(res == vac_id) {
+      voxels[vdx] = vac_id;
+      return val;
+    }
+    //If occupied maintain the original position:
+    return vdx;
+  }
+  const voxel_t vac_id;
+  const voxel_t species_id;
+  const mol_t* offsets;
+  voxel_t* voxels;
+};
+
+void Diffuser::walk() {
+  const size_t size(mols_.size());
+  thrust::transform(thrust::device, 
+      thrust::counting_iterator<unsigned>(seed_),
+      thrust::counting_iterator<unsigned>(seed_+size),
+      mols_.begin(),
+      mols_.begin(),
+      generate(vac_id_, species_id_, thrust::raw_pointer_cast(&offsets_[0]), thrust::raw_pointer_cast(&voxels_[0])));
+  seed_ += size;
+}
+
+/*
+//Use atomicCAS to avoid race condition: 39.1 s
+struct generate {
   __host__ __device__ generate(const mol_t* _offsets, voxel_t* _voxels):
     offsets(_offsets), voxels(_voxels) {} 
   __device__ umol_t operator()(const unsigned n, const umol_t vdx) const {
@@ -68,11 +111,6 @@ struct generate {
     const bool odd_lay((vdx/NUM_COLROW)&1);
     const bool odd_col((vdx%NUM_COLROW/NUM_ROW)&1);
     mol2_t val(mol2_t(vdx)+offsets[rand+(24&(-odd_lay))+(12&(-odd_col))]);
-    /*
-    if(val < 0 || val > NUM_VOXEL) {
-      return vdx;
-    }
-    */
     const voxel_t res(atomicCAS(voxels+val, 0, 1));
     if(res == 0) {
       voxels[vdx] = 0;
@@ -94,6 +132,7 @@ void Diffuser::walk() {
       generate(thrust::raw_pointer_cast(&offsets_[0]), thrust::raw_pointer_cast(&voxels_[0])));
   seed_ += size;
 }
+*/
 
 /*
 //Perform walk in predicate, only single transformation function: 38.7 s
