@@ -47,10 +47,14 @@ class Model {
   Compartment& get_compartment();
   Stepper& get_stepper();
   std::vector<Species*>& get_species();
+  voxel_t get_null_id() const;
+  voxel_t get_stride() const;
  private:
   std::vector<Species*> species_;
+  const voxel_t null_id_;
   Stepper stepper_;
   Compartment compartment_; //must declare this at the end after initializing others
+  voxel_t stride_;
 };
 
 #endif /* __Model_hpp */

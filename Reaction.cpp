@@ -28,38 +28,35 @@
 // written by Satya Arjunan <satya.arjunan@gmail.com>
 //
 
+#include <Reaction.hpp>
+#include <Species.hpp>
 
-#ifndef __Diffuser_hpp
-#define __Diffuser_hpp
+Reaction::Reaction() {
+}
 
-#include <thrust/device_vector.h>
-#include <Common.hpp>
+void Reaction::push_substrate(Species& species) {
+  substrates_.push_back(&species);
+  species.push_reaction(*this);
+}
 
-class Diffuser
-{ 
-public: 
-  Diffuser(const double, Species&);
-  ~Diffuser() {}
-  void initialize();
-  void walk();
-  double get_D() const;
-private:
-  void set_offsets();
-  const double D_;
-  Species& species_;
-  Compartment& compartment_;
-  thrust::device_vector<umol_t>& mols_;
-  thrust::device_vector<voxel_t>& voxels_;
-  thrust::device_vector<mol_t>& offsets_;
-  const voxel_t species_id_;
-  const voxel_t vac_id_;
-  unsigned seed_;
-  voxel_t stride_;
-  voxel_t id_stride_;
-  thrust::device_vector<bool> is_reactive_;
-  thrust::device_vector<Reaction*> reactions_;
-  thrust::device_vector<umol_t> reacteds_;
-};
+void Reaction::push_product(Species& species) {
+  products_.push_back(&species);
+}
 
-#endif /* __Diffuser_hpp */
+void Reaction::set_p(const double p) {
+  p_ = p;
+}
+
+double Reaction::get_p() const {
+  return p_;
+}
+
+std::vector<Species*>& Reaction::get_substrates() {
+  return substrates_;
+}
+
+std::vector<Species*>& Reaction::get_products() {
+  return products_;
+}
+
 

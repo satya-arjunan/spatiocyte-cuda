@@ -35,6 +35,7 @@
 #include <Diffuser.hpp>
 #include <Compartment.hpp>
 #include <Model.hpp>
+#include <Reaction.hpp>
 #include <random>
 
 Diffuser::Diffuser(const double D, Species& species):
@@ -50,51 +51,105 @@ Diffuser::Diffuser(const double D, Species& species):
 }
 
 void Diffuser::initialize() {
-  std::cout << "init diffuser of:" << species_.get_name_id() << std::endl;
+  Model& model(species_.get_model());
+  stride_ = model.get_stride();
+  id_stride_ = species_id_*stride_;
+  is_reactive_.resize(model.get_species().size(), false);
+  reactions_.resize(model.get_species().size(), NULL);
+ 
+  std::vector<Reaction*>& reactions(species_.get_reactions());
+  for(unsigned i(0); i != reactions.size(); ++i) {
+    std::vector<Species*>& substrates(reactions[i]->get_substrates());
+    for(unsigned j(0); j != substrates.size(); ++j) {
+      voxel_t reactant_id(substrates[j]->get_id());
+      if(reactant_id != species_id_) {
+        reactions_[reactant_id] = reactions[i];
+        is_reactive_[reactant_id] = true;
+      } 
+    } 
+  } 
+  std::cout << "My name:" << species_.get_name_id() << std::endl;
+  for(unsigned i(0); i != is_reactive_.size(); ++i) {
+    std::cout << "\t" << is_reactive_[i] << " reactant name:" << model.get_species()[i]->get_name_id() << std::endl;
+    std::cout << "\t" << (reactions_[i] != NULL) << std::endl;
+  }
 }
 
-double Diffuser::getD() {
+double Diffuser::get_D() const {
   return D_;
 }
 
 struct generate {
-  __host__ __device__ generate(const voxel_t _vac_id, const voxel_t _species_id,
-      const mol_t* _offsets, voxel_t* _voxels):
-    vac_id(_vac_id),
-    species_id(_species_id),
-    offsets(_offsets),
-    voxels(_voxels) {} 
-  __device__ umol_t operator()(const unsigned n, const umol_t vdx) const {
+  __host__ __device__ generate(
+      const unsigned seed,
+      const voxel_t stride,
+      const voxel_t id_stride,
+      const voxel_t vac_id,
+      const bool* is_reactive,
+      const mol_t* offsets,
+      umol_t* reacteds,
+      voxel_t* voxels):
+    seed_(seed),
+    stride_(stride),
+    id_stride_(id_stride),
+    vac_id_(vac_id),
+    is_reactive_(is_reactive),
+    offsets_(offsets),
+    reacteds_(reacteds),
+    voxels_(voxels) {} 
+  __device__ umol_t operator()(const unsigned index, const umol_t vdx) const {
     curandState s;
-    curand_init(n, 0, 0, &s);
+    curand_init(seed_+index, 0, 0, &s);
     float ranf(curand_uniform(&s)*11.999999);
     const unsigned rand((unsigned)truncf(ranf));
     const bool odd_lay((vdx/NUM_COLROW)&1);
     const bool odd_col((vdx%NUM_COLROW/NUM_ROW)&1);
-    mol2_t val(mol2_t(vdx)+offsets[rand+(24&(-odd_lay))+(12&(-odd_col))]);
-    const voxel_t res(atomicCAS(voxels+val, vac_id, species_id));
-    //If not occupied:
-    if(res == vac_id) {
-      voxels[vdx] = vac_id;
+    mol2_t val(mol2_t(vdx)+offsets_[rand+(24&(-odd_lay))+(12&(-odd_col))]);
+    const voxel_t res(atomicCAS(voxels_+val, vac_id_, index+id_stride_));
+    //If not occupied, walk:
+    if(res == vac_id_) {
+      voxels_[vdx] = vac_id_;
+      reacteds_[index] = 0;
       return val;
     }
-    //If occupied maintain the original position:
+    //If occupied, check and add reacted:
+    const voxel_t tar_id(res/stride_);
+    if(is_reactive_[tar_id]) {
+      reacteds_[index] = res;
+    }
+    else {
+      reacteds_[index] = 0;
+    }
+    //Stay at original position:
     return vdx;
   }
-  const voxel_t vac_id;
-  const voxel_t species_id;
-  const mol_t* offsets;
-  voxel_t* voxels;
+  const unsigned seed_;
+  const voxel_t stride_;
+  const voxel_t id_stride_;
+  const voxel_t vac_id_;
+  const bool* is_reactive_;
+  const mol_t* offsets_;
+  umol_t* reacteds_;
+  voxel_t* voxels_;
 };
 
 void Diffuser::walk() {
   const size_t size(mols_.size());
+  reacteds_.resize(size);
   thrust::transform(thrust::device, 
-      thrust::counting_iterator<unsigned>(seed_),
-      thrust::counting_iterator<unsigned>(seed_+size),
+      thrust::counting_iterator<unsigned>(0),
+      thrust::counting_iterator<unsigned>(size),
       mols_.begin(),
       mols_.begin(),
-      generate(vac_id_, species_id_, thrust::raw_pointer_cast(&offsets_[0]), thrust::raw_pointer_cast(&voxels_[0])));
+      generate(
+        seed_,
+        stride_,
+        id_stride_,
+        vac_id_,
+        thrust::raw_pointer_cast(&is_reactive_[0]),
+        thrust::raw_pointer_cast(&offsets_[0]),
+        thrust::raw_pointer_cast(&reacteds_[0]),
+        thrust::raw_pointer_cast(&voxels_[0])));
   seed_ += size;
 }
 

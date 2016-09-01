@@ -46,21 +46,25 @@ public:
   void populate();
   void populate_in_lattice();
   void push_host_mol(const umol_t);
+  void push_reaction(Reaction&);
   bool is_structure_species() const;
   bool is_root_structure_species() const;
   voxel_t get_id() const;
   voxel_t get_vac_id() const;
   Diffuser& get_diffuser();
   Species& get_vacant();
+  Model& get_model() const;
   Compartment& get_compartment();
   const std::string& get_name() const;
   const std::string get_name_id() const;
   std::vector<umol_t>& get_host_mols();
   thrust::device_vector<umol_t>& get_mols();
+  std::vector<Reaction*>& get_reactions();
 private:
   const std::string get_init_name(const std::string) const;
 private:
   Compartment& compartment_;
+  Model& model_;
   Species& vacant_;
   thrust::device_vector<voxel_t>& voxels_;
   const std::string name_;
@@ -71,6 +75,7 @@ private:
   std::vector<umol_t> host_mols_;
   thrust::device_vector<umol_t> mols_;
   Diffuser diffuser_;
+  std::vector<Reaction*> reactions_;
 };
 
 #endif /* __Species_hpp */

@@ -29,6 +29,7 @@
 //
 
 #include <iostream>
+#include <algorithm>
 #include <string>
 #include <time.h>
 #include <thrust/execution_policy.h>
@@ -36,12 +37,14 @@
 #include <curand_kernel.h>
 #include <Species.hpp>
 #include <Compartment.hpp>
+#include <Reaction.hpp>
 #include <Model.hpp>
 
 Species::Species(const std::string name, const unsigned nmols, const double D,
     Model& model, Compartment& compartment, Species& vacant,
     const bool is_structure_species):
   compartment_(compartment),
+  model_(model),
   vacant_(vacant),
   voxels_(compartment_.get_lattice().get_voxels()),
   name_(get_init_name(name)),
@@ -56,10 +59,21 @@ void Species::initialize() {
   diffuser_.initialize();
 }
 
+void Species::push_reaction(Reaction& reaction) {
+  if(std::find(reactions_.begin(), reactions_.end(), &reaction) ==
+      reactions_.end()) { 
+    reactions_.push_back(&reaction);
+  }
+}
+
+std::vector<Reaction*>& Species::get_reactions() {
+  return reactions_;
+}
+
 struct populate_lattice {
-  __host__ __device__ populate_lattice(const voxel_t _id, const umol_t _size, 
+  __host__ __device__ populate_lattice(const voxel_t _stride_id, const umol_t _size, 
       voxel_t* _voxels):
-    id(_id),
+    stride_id(_stride_id),
     size(_size),
     voxels(_voxels) {} 
   __device__ umol_t operator()(const unsigned n) const {
@@ -71,10 +85,10 @@ struct populate_lattice {
       ranf = curand_uniform(&s)*(size + 0.999999);
       rand = (unsigned)truncf(ranf);
     }
-    voxels[rand] = id;
+    voxels[rand] = stride_id+n;
     return rand;
   }
-  const voxel_t id;
+  const voxel_t stride_id;
   const umol_t size;
   voxel_t* voxels;
 };
@@ -85,7 +99,7 @@ void Species::populate() {
       thrust::counting_iterator<unsigned>(0),
       thrust::counting_iterator<unsigned>(init_nmols_),
       mols_.begin(),
-      populate_lattice(get_id(), voxels_.size(),
+      populate_lattice(get_id()*model_.get_stride(), voxels_.size(),
         thrust::raw_pointer_cast(&voxels_[0])));
 }
 
@@ -96,7 +110,7 @@ void Species::populate_in_lattice() {
     thrust::device_vector<umol_t>::iterator> population(
         voxels_.begin(), mols_.begin());
   thrust::fill_n(thrust::device, population, mols_.size(), get_id());
-  if(diffuser_.getD()) {
+  if(diffuser_.get_D()) {
     host_mols_.clear();
     std::vector<umol_t>().swap(host_mols_);
   } else {
@@ -115,6 +129,10 @@ bool Species::is_structure_species() const {
 
 bool Species::is_root_structure_species() const {
   return (this == &vacant_);
+}
+
+Model& Species::get_model() const {
+  return model_;
 }
 
 voxel_t Species::get_id() const {
@@ -158,7 +176,7 @@ const std::string Species::get_init_name(const std::string name) const {
 }
 
 std::vector<umol_t>& Species::get_host_mols() {
-  if(diffuser_.getD()) {
+  if(diffuser_.get_D()) {
     host_mols_.resize(mols_.size());
     thrust::copy(mols_.begin(), mols_.end(), host_mols_.begin());
   }

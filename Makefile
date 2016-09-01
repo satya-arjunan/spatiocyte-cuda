@@ -9,6 +9,7 @@ SRC=\
 		Lattice\
 		Species\
 		Diffuser\
+		Reaction\
 		VisualLogger
 
 IFLAGS = -I. 

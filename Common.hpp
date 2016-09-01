@@ -45,6 +45,7 @@ class Diffuser;
 class Model;
 class Species;
 class Stepper;
+class Reaction;
 class VisualLogger;
 
 #define ADJS 12

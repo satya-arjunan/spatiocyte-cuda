@@ -33,15 +33,26 @@
 #include <Model.hpp>
 #include <math.h>
 
-Model::Model()
-    : compartment_("root", LENGTH_X, LENGTH_Y, LENGTH_Z, *this) {}
-      
+Model::Model():
+  null_id_((voxel_t)(pow(2,sizeof(voxel_t)*8))),
+  compartment_("root", LENGTH_X, LENGTH_Y, LENGTH_Z, *this) {
+} 
+
 void Model::initialize() {
-  std::cout << "species size:" << species_.size() << std::endl;
+  stride_ = null_id_/species_.size();
+  std::cout << "species size:" << species_.size() << " null_id:" << null_id_ << " stride:" << stride_ <<  std::endl;
   compartment_.initialize();
   for (unsigned i(0), n(species_.size()); i != n; ++i) {
       species_[i]->initialize();
     }
+}
+
+voxel_t Model::get_null_id() const {
+  return null_id_;
+}
+
+voxel_t Model::get_stride() const {
+  return stride_;
 }
 
 void Model::run(const double interval) {

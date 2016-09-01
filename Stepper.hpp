@@ -41,7 +41,7 @@ public:
    ~Stepper() {}
   void step();
   void set_diffuser(Diffuser&);
-  void add_diffuser(Diffuser&);
+  void push_diffuser(Diffuser&);
   void set_visual_logger(VisualLogger&);
   double get_current_time() const;
 private:

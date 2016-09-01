@@ -32,24 +32,30 @@
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <Spatiocyte.hpp>
 #include <Model.hpp>
+#include <Reaction.hpp>
 #include <VisualLogger.hpp>
 
 int main() {
   Model model;
-  Species A("A", 8000, 1e-12, model, model.get_compartment(),
+  Species A("A", 800000, 1e-12, model, model.get_compartment(),
             model.get_compartment().get_volume_species());
-  Species B("B", 7000, 1e-12, model, model.get_compartment(),
+  Species B("B", 800000, 1e-12, model, model.get_compartment(),
             model.get_compartment().get_volume_species());
-  Species C("C", 1000, 1e-12, model, model.get_compartment(),
+  Species C("C", 0, 1e-12, model, model.get_compartment(),
             model.get_compartment().get_volume_species());
+  Reaction AB_to_C;
+  AB_to_C.push_substrate(A);
+  AB_to_C.push_substrate(B);
+  AB_to_C.push_product(C);
+  AB_to_C.set_p(1);
   model.initialize();
   A.populate();
   B.populate();
   C.populate();
   VisualLogger visual_logger(model);
-  model.get_stepper().add_diffuser(A.get_diffuser());
-  model.get_stepper().add_diffuser(B.get_diffuser());
-  model.get_stepper().add_diffuser(C.get_diffuser());
+  model.get_stepper().push_diffuser(A.get_diffuser());
+  model.get_stepper().push_diffuser(B.get_diffuser());
+  model.get_stepper().push_diffuser(C.get_diffuser());
   model.get_stepper().set_visual_logger(visual_logger);
   visual_logger.push_species(A);
   visual_logger.push_species(B);

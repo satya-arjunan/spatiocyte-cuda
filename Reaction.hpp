@@ -29,37 +29,27 @@
 //
 
 
-#ifndef __Diffuser_hpp
-#define __Diffuser_hpp
+#ifndef __Reaction_hpp
+#define __Reaction_hpp
 
-#include <thrust/device_vector.h>
 #include <Common.hpp>
 
-class Diffuser
+class Reaction
 { 
 public: 
-  Diffuser(const double, Species&);
-  ~Diffuser() {}
-  void initialize();
-  void walk();
-  double get_D() const;
+  Reaction();
+  ~Reaction() {}
+  void push_substrate(Species&);
+  void push_product(Species&);
+  void set_p(const double);
+  double get_p() const;
+  std::vector<Species*>& get_substrates();
+  std::vector<Species*>& get_products();
 private:
-  void set_offsets();
-  const double D_;
-  Species& species_;
-  Compartment& compartment_;
-  thrust::device_vector<umol_t>& mols_;
-  thrust::device_vector<voxel_t>& voxels_;
-  thrust::device_vector<mol_t>& offsets_;
-  const voxel_t species_id_;
-  const voxel_t vac_id_;
-  unsigned seed_;
-  voxel_t stride_;
-  voxel_t id_stride_;
-  thrust::device_vector<bool> is_reactive_;
-  thrust::device_vector<Reaction*> reactions_;
-  thrust::device_vector<umol_t> reacteds_;
+  double p_;
+  std::vector<Species*> substrates_;
+  std::vector<Species*> products_;
 };
 
-#endif /* __Diffuser_hpp */
+#endif /* __Reaction_hpp */
 
