@@ -180,6 +180,49 @@ void Diffuser::walk() {
 }
 
 /*
+// With pseudo reaction and non-overlap population: 43.2 s
+struct is_reacted {
+  __device__ bool operator()(const umol_t reacted) {
+    return reacted;
+  }
+};
+
+struct react {
+  __device__ umol_t operator()(const umol_t mol, const umol_t reacted) const {
+    return mol;
+  }
+};
+
+void Diffuser::walk() {
+  const size_t size(mols_.size());
+  reacteds_.resize(size);
+  thrust::transform(thrust::device, 
+      thrust::counting_iterator<unsigned>(0),
+      thrust::counting_iterator<unsigned>(size),
+      mols_.begin(),
+      mols_.begin(),
+      generate(
+        seed_,
+        stride_,
+        id_stride_,
+        vac_id_,
+        thrust::raw_pointer_cast(&is_reactive_[0]),
+        thrust::raw_pointer_cast(&offsets_[0]),
+        thrust::raw_pointer_cast(&reacteds_[0]),
+        thrust::raw_pointer_cast(&voxels_[0])));
+  thrust::transform_if(thrust::device,
+      mols_.begin(),
+      mols_.end(),
+      reacteds_.begin(),
+      reacteds_.begin(),
+      mols_.begin(),
+      react(),
+      is_reacted());
+  seed_ += size;
+}
+*/
+
+/*
 //With reaction check list: 41.5 s
 struct generate {
   __host__ __device__ generate(

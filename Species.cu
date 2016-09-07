@@ -73,6 +73,7 @@ std::vector<Reaction*>& Species::get_reactions() {
   return reactions_;
 }
 
+/*
 __host__ __device__
 unsigned int hash(unsigned int a)
 {
@@ -106,14 +107,18 @@ struct populate_lattice {
   const umol_t size;
   voxel_t* voxels;
 };
-
+*/
 
 /*
 struct populate_lattice {
-  __host__ __device__ populate_lattice(const voxel_t _stride_id, const umol_t _size, 
+  __host__ __device__ populate_lattice(
+      const unsigned max_threads,
+      const voxel_t stride_id,
+      const umol_t _size, 
       voxel_t* _voxels):
     stride_id(_stride_id),
     size(_size),
+    mols(_voxels),
     voxels(_voxels) {} 
   __device__ umol_t operator()(const unsigned n) const {
     thrust::default_random_engine rng;
@@ -126,46 +131,89 @@ struct populate_lattice {
     voxels[rand] = stride_id+n;
     return rand;
   }
-  const voxel_t stride_id;
-  const umol_t size;
-  voxel_t* voxels;
+  const unsigned max_threads_;
+  const voxel_t stride_id_;
+  const umol_t mols_size_;
+  const umol_t voxels_size_;
+  voxel_t* voxels_;
+  umol_t* mols_;
 };
+
+
+
+void Species::populate() { 
+  unsigned dev(0);
+  cudaSetDevice(dev);
+  cudaDeviceProp deviceProp;
+  cudaGetDeviceProperties(&deviceProp, dev);
+  unsigned max_threads(deviceProp.maxThreadsPerMultiProcessor);
+  unsigned cnts(std::min(max_threads, init_mols_));
+  mols_.resize(init_nmols_);
+  thrust::for_each(thrust::device, 
+      thrust::counting_iterator<unsigned>(0),
+      thrust::counting_iterator<unsigned>(cnts),
+      populate_lattice(
+        max_threads,
+        get_id()*model_.get_stride(),
+        mols_.size(),
+        voxels_.size(),
+        thrust::raw_pointer_cast(&mols_[0]),
+        thrust::raw_pointer_cast(&voxels_[0])));
+}
 */
 
 
-
-/*
 struct populate_lattice {
-  __host__ __device__ populate_lattice(const voxel_t _stride_id, const umol_t _size, 
-      voxel_t* _voxels):
-    stride_id(_stride_id),
-    size(_size),
-    voxels(_voxels) {} 
+  __host__ __device__ populate_lattice(
+      const unsigned seed,
+      const umol_t mol_size,
+      const voxel_t vac_id,
+      const voxel_t stride_id,
+      const umol_t voxel_size, 
+      voxel_t* voxels):
+    seed_(seed),
+    mol_size_(mol_size),
+    vac_id_(vac_id),
+    stride_id_(stride_id),
+    voxel_size_(voxel_size),
+    voxels_(voxels) {} 
   __device__ umol_t operator()(const unsigned n) const {
-    curandState s;
-    curand_init(n, 0, 0, &s);
-    float ranf(curand_uniform(&s)*(size + 0.999999));
-    unsigned rand((unsigned)truncf(ranf));
-    while(voxels[rand]) {
-      ranf = curand_uniform(&s)*(size + 0.999999);
-      rand = (unsigned)truncf(ranf);
+    thrust::default_random_engine rng(seed_);
+    rng.discard(n);
+    thrust::uniform_int_distribution<unsigned> u(0, voxel_size_);
+    unsigned rand(u(rng));
+    voxel_t res(atomicCAS(voxels_+rand, vac_id_, stride_id_+n));
+    unsigned cnt(0);
+    while(res != vac_id_) {
+      rng.discard(n+mol_size_*(++cnt));
+      rand = u(rng);
+      res = atomicCAS(voxels_+rand, vac_id_, stride_id_+n);
     }
-    voxels[rand] = stride_id+n;
     return rand;
   }
-  const voxel_t stride_id;
-  const umol_t size;
-  voxel_t* voxels;
+  const unsigned seed_;
+  const umol_t mol_size_;
+  const voxel_t vac_id_;
+  const voxel_t stride_id_;
+  const umol_t voxel_size_;
+  voxel_t* voxels_;
 };
-*/
+
+
 
 void Species::populate() {
+  const unsigned seed(id_);
   mols_.resize(init_nmols_);
   thrust::transform(thrust::device, 
       thrust::counting_iterator<unsigned>(0),
       thrust::counting_iterator<unsigned>(init_nmols_),
       mols_.begin(),
-      populate_lattice(get_id()*model_.get_stride(), voxels_.size(),
+      populate_lattice(
+        seed,
+        init_nmols_,
+        vac_id_,
+        get_id()*model_.get_stride(),
+        voxels_.size(),
         thrust::raw_pointer_cast(&voxels_[0])));
 }
 
