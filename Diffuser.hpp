@@ -59,6 +59,8 @@ private:
   thrust::device_vector<bool> is_reactive_;
   thrust::device_vector<Reaction*> reactions_;
   thrust::device_vector<umol_t> reacteds_;
+  thrust::device_vector<umol_t*> substrate_mols_;
+  thrust::device_vector<umol_t*> product_mols_;
 };
 
 #endif /* __Diffuser_hpp */

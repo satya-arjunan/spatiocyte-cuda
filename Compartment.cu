@@ -33,21 +33,22 @@
 #include <Species.hpp>
 #include <Model.hpp>
 
-
 Compartment::Compartment(std::string name, const double len_x,
     const double len_y, const double len_z, Model& model):
   name_(name),
   model_(model),
   offsets_(ADJS*4),
   lattice_(Vector<unsigned>(NUM_COL, NUM_ROW, NUM_LAY)),
-  dimensions_(get_lattice().get_dimensions().x*2*VOXEL_RADIUS, 
+  dimensions_(get_lattice().get_dimensions().x*HCP_X, 
               get_lattice().get_dimensions().y*2*VOXEL_RADIUS,
-              get_lattice().get_dimensions().z*2*VOXEL_RADIUS),
+              get_lattice().get_dimensions().z*HCP_Z),
   volume_species_("volume", 0, 0, model, *this, volume_species_, true),
   surface_species_("surface", 0, 0, model, *this, volume_species_, true) {
 }
 
 void Compartment::initialize() {
+  std::cout << "Volume:" << dimensions_.x*dimensions_.y*dimensions_.z <<
+    " m^3" << std::endl;
   double num_voxel(double(NUM_COL)*NUM_ROW*NUM_LAY);
   double max_umol_t(pow(2,sizeof(umol_t)*8));
   if(num_voxel > max_umol_t)

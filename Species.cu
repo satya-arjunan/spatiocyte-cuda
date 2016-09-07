@@ -56,6 +56,9 @@ Species::Species(const std::string name, const unsigned nmols, const double D,
 }
 
 void Species::initialize() {
+  if(mols_.size() < 80000) {
+    mols_.reserve(10000);
+  }
   diffuser_.initialize();
 }
 
@@ -70,6 +73,68 @@ std::vector<Reaction*>& Species::get_reactions() {
   return reactions_;
 }
 
+__host__ __device__
+unsigned int hash(unsigned int a)
+{
+    a = (a+0x7ed55d16) + (a<<12);
+    a = (a^0xc761c23c) ^ (a>>19);
+    a = (a+0x165667b1) + (a<<5);
+    a = (a+0xd3a2646c) ^ (a<<9);
+    a = (a+0xfd7046c5) + (a<<3);
+    a = (a^0xb55a4f09) ^ (a>>16);
+    return a;
+}
+
+struct populate_lattice {
+  __host__ __device__ populate_lattice(const voxel_t _stride_id, const umol_t _size, 
+      voxel_t* _voxels):
+    stride_id(_stride_id),
+    size(_size),
+    voxels(_voxels) {} 
+  __device__ umol_t operator()(const unsigned n) const {
+    unsigned int seed = hash(n);
+    thrust::default_random_engine rng(seed);
+    thrust::uniform_int_distribution<unsigned> u(0, size);
+    unsigned rand(u(rng));
+    while(voxels[rand]) {
+      rand = u(rng);
+    }
+    voxels[rand] = stride_id+n;
+    return rand;
+  }
+  const voxel_t stride_id;
+  const umol_t size;
+  voxel_t* voxels;
+};
+
+
+/*
+struct populate_lattice {
+  __host__ __device__ populate_lattice(const voxel_t _stride_id, const umol_t _size, 
+      voxel_t* _voxels):
+    stride_id(_stride_id),
+    size(_size),
+    voxels(_voxels) {} 
+  __device__ umol_t operator()(const unsigned n) const {
+    thrust::default_random_engine rng;
+    rng.discard(n);
+    thrust::uniform_int_distribution<unsigned> u(0, size);
+    unsigned rand(u(rng));
+    while(voxels[rand]) {
+      rand = u(rng);
+    }
+    voxels[rand] = stride_id+n;
+    return rand;
+  }
+  const voxel_t stride_id;
+  const umol_t size;
+  voxel_t* voxels;
+};
+*/
+
+
+
+/*
 struct populate_lattice {
   __host__ __device__ populate_lattice(const voxel_t _stride_id, const umol_t _size, 
       voxel_t* _voxels):
@@ -92,6 +157,7 @@ struct populate_lattice {
   const umol_t size;
   voxel_t* voxels;
 };
+*/
 
 void Species::populate() {
   mols_.resize(init_nmols_);

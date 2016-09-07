@@ -29,9 +29,16 @@
 //
 
 #define VOXEL_RADIUS 2.5e-9
+//benchmark volume
 #define LENGTH_X 3.15e-6 //ncol
 #define LENGTH_Y 3.15e-6 //nrow
 #define LENGTH_Z 3.15e-6 //nlay
+/*
+//volume = 3e-17 m^3
+#define LENGTH_X 3.107232e-6 //ncol
+#define LENGTH_Y 3.107232e-6 //nrow
+#define LENGTH_Z 3.107232e-6 //nlay
+*/
 /*
 #define LENGTH_X 0.164e-6 //ncol
 #define LENGTH_Y 0.171e-6 //nrow

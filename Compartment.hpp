@@ -41,8 +41,7 @@
 #define HCP_Z double(VOXEL_RADIUS*1.632993161855452)
 #define NUM_COL mol_t(LENGTH_X/HCP_X+3)
 #define NUM_LAY mol_t(LENGTH_Z/HCP_Z+3)
-//#define NUM_ROW unsigned(LENGTH_Y/VOXEL_RADIUS/2+3) //correct version
-#define NUM_ROW mol_t(LENGTH_Y/VOXEL_RADIUS/2+2)
+#define NUM_ROW mol_t(LENGTH_Y/VOXEL_RADIUS/2+3)
 #define NUM_COLROW mol_t(NUM_COL*NUM_ROW)
 #define NUM_COLROWROW umol_t(umol_t(NUM_COLROW)*NUM_ROW)
 #define NUM_VOXEL umol_t(umol_t(NUM_COLROW)*NUM_LAY)

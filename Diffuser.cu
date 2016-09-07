@@ -56,6 +56,8 @@ void Diffuser::initialize() {
   id_stride_ = species_id_*stride_;
   is_reactive_.resize(model.get_species().size(), false);
   reactions_.resize(model.get_species().size(), NULL);
+  substrate_mols_.resize(model.get_species().size(), NULL);
+  product_mols_.resize(model.get_species().size(), NULL);
  
   std::vector<Reaction*>& reactions(species_.get_reactions());
   for(unsigned i(0); i != reactions.size(); ++i) {
@@ -65,20 +67,120 @@ void Diffuser::initialize() {
       if(reactant_id != species_id_) {
         reactions_[reactant_id] = reactions[i];
         is_reactive_[reactant_id] = true;
+        substrate_mols_[reactant_id] = thrust::raw_pointer_cast(substrates[j]->get_mols().data());
+        product_mols_[reactant_id] = thrust::raw_pointer_cast(reactions[i]->get_products()[0]->get_mols().data());
       } 
     } 
   } 
+  /*
   std::cout << "My name:" << species_.get_name_id() << std::endl;
   for(unsigned i(0); i != is_reactive_.size(); ++i) {
     std::cout << "\t" << is_reactive_[i] << " reactant name:" << model.get_species()[i]->get_name_id() << std::endl;
     std::cout << "\t" << (reactions_[i] != NULL) << std::endl;
   }
+  */
 }
 
 double Diffuser::get_D() const {
   return D_;
 }
 
+struct generate {
+  __host__ __device__ generate(
+      const unsigned seed,
+      const voxel_t stride,
+      const voxel_t id_stride,
+      const voxel_t vac_id,
+      const bool* is_reactive,
+      const mol_t* offsets,
+      umol_t* reacteds,
+      voxel_t* voxels):
+    seed_(seed),
+    stride_(stride),
+    id_stride_(id_stride),
+    vac_id_(vac_id),
+    is_reactive_(is_reactive),
+    offsets_(offsets),
+    reacteds_(reacteds),
+    voxels_(voxels) {} 
+  __device__ umol_t operator()(const unsigned index, const umol_t vdx) const {
+    curandState s;
+    curand_init(seed_+index, 0, 0, &s);
+    float ranf(curand_uniform(&s)*11.999999);
+    const unsigned rand((unsigned)truncf(ranf));
+    const bool odd_lay((vdx/NUM_COLROW)&1);
+    const bool odd_col((vdx%NUM_COLROW/NUM_ROW)&1);
+    mol2_t val(mol2_t(vdx)+offsets_[rand+(24&(-odd_lay))+(12&(-odd_col))]);
+    const voxel_t res(atomicCAS(voxels_+val, vac_id_, index+id_stride_));
+    //If not occupied, walk:
+    if(res == vac_id_) {
+      voxels_[vdx] = vac_id_;
+      reacteds_[index] = 0;
+      return val;
+    }
+    //If occupied, check and add reacted:
+    const voxel_t tar_id(res/stride_);
+    if(is_reactive_[tar_id]) {
+      reacteds_[index] = res;
+    }
+    else {
+      reacteds_[index] = 0;
+    }
+    //Stay at original position:
+    return vdx;
+  }
+  const unsigned seed_;
+  const voxel_t stride_;
+  const voxel_t id_stride_;
+  const voxel_t vac_id_;
+  const bool* is_reactive_;
+  const mol_t* offsets_;
+  umol_t* reacteds_;
+  voxel_t* voxels_;
+};
+
+struct is_reacted {
+  __device__ bool operator()(const umol_t reacted) {
+    return reacted;
+  }
+};
+
+struct react {
+  __device__ umol_t operator()(const umol_t mol, const umol_t reacted) const {
+    return mol;
+  }
+};
+
+void Diffuser::walk() {
+  const size_t size(mols_.size());
+  reacteds_.resize(size);
+  thrust::transform(thrust::device, 
+      thrust::counting_iterator<unsigned>(0),
+      thrust::counting_iterator<unsigned>(size),
+      mols_.begin(),
+      mols_.begin(),
+      generate(
+        seed_,
+        stride_,
+        id_stride_,
+        vac_id_,
+        thrust::raw_pointer_cast(&is_reactive_[0]),
+        thrust::raw_pointer_cast(&offsets_[0]),
+        thrust::raw_pointer_cast(&reacteds_[0]),
+        thrust::raw_pointer_cast(&voxels_[0])));
+  thrust::transform_if(thrust::device,
+      mols_.begin(),
+      mols_.end(),
+      reacteds_.begin(),
+      reacteds_.begin(),
+      mols_.begin(),
+      react(),
+      is_reacted());
+  seed_ += size;
+}
+
+/*
+//With reaction check list: 41.5 s
 struct generate {
   __host__ __device__ generate(
       const unsigned seed,
@@ -152,6 +254,7 @@ void Diffuser::walk() {
         thrust::raw_pointer_cast(&voxels_[0])));
   seed_ += size;
 }
+*/
 
 /*
 //Use atomicCAS to avoid race condition: 39.1 s

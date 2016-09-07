@@ -40,7 +40,7 @@ Model::Model():
 
 void Model::initialize() {
   stride_ = null_id_/species_.size();
-  std::cout << "species size:" << species_.size() << " null_id:" << null_id_ << " stride:" << stride_ <<  std::endl;
+  //std::cout << "species size:" << species_.size() << " null_id:" << null_id_ << " stride:" << stride_ <<  std::endl;
   compartment_.initialize();
   for (unsigned i(0), n(species_.size()); i != n; ++i) {
       species_[i]->initialize();
