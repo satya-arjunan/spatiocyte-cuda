@@ -45,6 +45,7 @@
 #endif
 
 #include <png.h>
+#include <zlib.h>
 #include <GL/gl.h>
 #include <GL/glu.h>
 
@@ -59,7 +60,7 @@
 #define PI 3.1415926535897932384626433832795028841971693993751
 #define MAX_COLORS 20
 #define PNG_NUM_MAX 9999999
-const unsigned int GLScene::TIMEOUT_INTERVAL = 10;
+const unsigned int GLScene::TIMEOUT_INTERVAL = 20;
 const unsigned int SCREEN_WIDTH = 460;
 const unsigned int SCREEN_HEIGHT = 360;
 
@@ -123,8 +124,9 @@ GLScene::GLScene(const Glib::RefPtr<const Gdk::GL::Config>& config,
 : Gtk::GL::DrawingArea(config),
   theRotateAngle(5.0),
   isInvertBound(false),
-  m_Run(false),
-  m_RunReverse(false),
+  isShownSurface(false),
+  is_playing_(false),
+  is_forward_(true),
   show3DMolecule(false),
   showSurface(false),
   showTime(true),
@@ -133,14 +135,26 @@ GLScene::GLScene(const Glib::RefPtr<const Gdk::GL::Config>& config,
   xAngle(0),
   yAngle(0),
   zAngle(0),
-  m_stepCnt(-1),
+  frame_cnt_(0),
   font_size(24),
   theMeanPointSize(0),
   thePngNumber(1),
   theScreenHeight(SCREEN_HEIGHT),
-  theScreenWidth(SCREEN_WIDTH)
+  theScreenWidth(SCREEN_WIDTH),
+  is_mouse_rotate_(false),
+  is_mouse_zoom_(false),
+  is_mouse_pan_(false),
+  is_mouse_rotated_(false),
+  mouse_drag_pos_x_(0),
+  mouse_drag_pos_y_(0),
+  mouse_drag_pos_z_(0),
+  mouse_x_(0),
+  mouse_y_(0),
+  init_zoom_(2.5)
 {
-  add_events(Gdk::VISIBILITY_NOTIFY_MASK); 
+  add_events(Gdk::VISIBILITY_NOTIFY_MASK | Gdk::BUTTON_PRESS_MASK |
+             Gdk::BUTTON_RELEASE_MASK | Gdk::POINTER_MOTION_MASK | 
+             Gdk::POINTER_MOTION_HINT_MASK | Gdk::KEY_PRESS_MASK);
   std::ostringstream aFileName;
   aFileName << aBaseName << std::ends;
   theFile.open( aFileName.str().c_str(), std::ios::binary );
@@ -150,9 +164,8 @@ GLScene::GLScene(const Glib::RefPtr<const Gdk::GL::Config>& config,
   theFile.read((char*) (&theColSize), sizeof(theColSize));
   theFile.read((char*) (&theLayerSize), sizeof(theLayerSize));
   theFile.read((char*) (&theRowSize), sizeof(theRowSize));
-  theFile.read((char*) (&theRealColSize), sizeof(theRealColSize));
-  theFile.read((char*) (&theRealLayerSize), sizeof(theRealLayerSize));
-  theFile.read((char*) (&theRealRowSize), sizeof(theRealRowSize));
+  theFile.read((char*) (&min_point_), sizeof(min_point_));
+  theFile.read((char*) (&max_point_), sizeof(max_point_));
   theFile.read((char*) (&theLatticeSpSize), sizeof(theLatticeSpSize));
   theFile.read((char*) (&thePolymerSize), sizeof(thePolymerSize));
   theFile.read((char*) (&theReservedSize), sizeof(theReservedSize));
@@ -353,17 +366,15 @@ GLScene::GLScene(const Glib::RefPtr<const Gdk::GL::Config>& config,
   std::cout << "row:" << theRowSize << " col:" << theColSize  <<
     " layer:" << theLayerSize << " marker:" <<
     theLogMarker << std::endl << std::flush;
-  std::streampos aStreamPos;
-  loadCoords(aStreamPos);
   theOriRow = 0;
   theOriLayer = 0;
   theRadius = 0.5;
   switch(theLatticeType)
     {
     case HCP_LATTICE: 
-      _hcpO = theRadius/sqrt(3); 
-      _hcpX = theRadius*sqrt(3);
-      _hcpZ = theRadius*sqrt(8.0/3.0); // for division require .0
+      hcpO_ = theRadius/sqrt(3); 
+      hcpX_ = theRadius*sqrt(3);
+      hcpZ_ = theRadius*sqrt(8.0/3.0); // for division require .0
       if(theMeanCount)
         {
           thePlot3DFunction = &GLScene::plotMean3DHCPMolecules;
@@ -391,40 +402,302 @@ GLScene::GLScene(const Glib::RefPtr<const Gdk::GL::Config>& config,
         }
       break;
     }
-  ViewSize = 1.05*sqrt((theRealColSize)*(theRealColSize)+
-                       (theRealLayerSize)*(theRealLayerSize)+
-                       (theRealRowSize)*(theRealRowSize));
+  init_frames();
+  dimensions_.x = max_point_.x - min_point_.x;
+  dimensions_.y = max_point_.y - min_point_.y;
+  dimensions_.z = max_point_.z - min_point_.z;
+  mid_point_.x = dimensions_.x/2 + min_point_.x;
+  mid_point_.y = dimensions_.y/2 + min_point_.y;
+  mid_point_.z = dimensions_.z/2 + min_point_.z;
+  ViewSize = 1.05*sqrt(dimensions_.x*dimensions_.x+
+                       dimensions_.y*dimensions_.y+
+                       dimensions_.z*dimensions_.z);
   if(ViewSize==0)
     { 
       ViewSize=1.0;
     }
-  ViewMidx=(theRealColSize)/2.0;
-  ViewMidy=(theRealLayerSize)/2.0; 
-  ViewMidz=(theRealRowSize)/2.0;
   FieldOfView=45;
   Xtrans=Ytrans=0;
   Near=-ViewSize/2.0;
+  //Near=-ViewSize;
   Aspect=1.0;
   set_size_request(theScreenWidth, theScreenHeight);
   std::cout << "done" << std::endl;
 }
 
+unsigned GLScene::get_frame_size() {
+  return frames_.size();
+}
+
+void GLScene::init_frames() {
+  std::streampos aStreamPos;
+  frames_.push_back(theFile.tellg());
+  loadCoords(aStreamPos);
+  int curr_frame(frame_cnt_);
+  theFile.seekg(frames_[++frame_cnt_]);
+  while((this->*theLoadCoordsFunction)(aStreamPos)) { 
+    ++frame_cnt_;
+  }
+  theFile.clear();
+  frame_cnt_ = curr_frame;
+  theFile.seekg(frames_[1]);
+  (this->*theLoadCoordsFunction)(aStreamPos);
+}
+
+bool GLScene::on_button_press_event(GdkEventButton* event) {
+  return on_button_release_event(event);
+}
+
+bool GLScene::get_is_event_masked(GdkEventButton* event, int mask) {
+  return (event->state & mask) == mask;
+} 
+
+bool GLScene::get_is_button(GdkEventButton* event, int button, int mask) {
+  if(event->button == button) {
+    return (event->type == GDK_BUTTON_PRESS);
+  }
+  return get_is_event_masked(event, mask); 
+}
+
+void GLScene::set_position(double x, double y, double& px, double& py,
+                           double& pz) {
+  GLint viewport[4];
+  glGetIntegerv(GL_VIEWPORT, viewport);
+  px = float(x-viewport[0])/float(viewport[2]);
+  py = float(y-viewport[1])/float(viewport[3]);      
+  px = left_ + px*(right_-left_);
+  py = top_  + py*(bottom_-top_);
+  pz = Near;
+}
+
+
+static void
+invertMatrix(const GLdouble *m, GLdouble *out )
+{
+
+/* NB. OpenGL Matrices are COLUMN major. */
+#define MAT(m,r,c) (m)[(c)*4+(r)]
+
+/* Here's some shorthand converting standard (row,column) to index. */
+#define m11 MAT(m,0,0)
+#define m12 MAT(m,0,1)
+#define m13 MAT(m,0,2)
+#define m14 MAT(m,0,3)
+#define m21 MAT(m,1,0)
+#define m22 MAT(m,1,1)
+#define m23 MAT(m,1,2)
+#define m24 MAT(m,1,3)
+#define m31 MAT(m,2,0)
+#define m32 MAT(m,2,1)
+#define m33 MAT(m,2,2)
+#define m34 MAT(m,2,3)
+#define m41 MAT(m,3,0)
+#define m42 MAT(m,3,1)
+#define m43 MAT(m,3,2)
+#define m44 MAT(m,3,3)
+
+   GLdouble det;
+   GLdouble d12, d13, d23, d24, d34, d41;
+   GLdouble tmp[16]; /* Allow out == in. */
+
+   /* Inverse = adjoint / det. (See linear algebra texts.)*/
+
+   /* pre-compute 2x2 dets for last two rows when computing */
+   /* cofactors of first two rows. */
+   d12 = (m31*m42-m41*m32);
+   d13 = (m31*m43-m41*m33);
+   d23 = (m32*m43-m42*m33);
+   d24 = (m32*m44-m42*m34);
+   d34 = (m33*m44-m43*m34);
+   d41 = (m34*m41-m44*m31);
+
+   tmp[0] =  (m22 * d34 - m23 * d24 + m24 * d23);
+   tmp[1] = -(m21 * d34 + m23 * d41 + m24 * d13);
+   tmp[2] =  (m21 * d24 + m22 * d41 + m24 * d12);
+   tmp[3] = -(m21 * d23 - m22 * d13 + m23 * d12);
+
+   /* Compute determinant as early as possible using these cofactors. */
+   det = m11 * tmp[0] + m12 * tmp[1] + m13 * tmp[2] + m14 * tmp[3];
+
+   /* Run singularity test. */
+   if (det == 0.0) {
+     std::cout << "det 0" << std::endl;
+      /* printf("invert_matrix: Warning: Singular matrix.\n"); */
+/*    memcpy(out,_identity,16*sizeof(double)); */
+   }
+   else {
+      GLdouble invDet = 1.0 / det;
+      /* Compute rest of inverse. */
+      tmp[0] *= invDet;
+      tmp[1] *= invDet;
+      tmp[2] *= invDet;
+      tmp[3] *= invDet;
+
+      tmp[4] = -(m12 * d34 - m13 * d24 + m14 * d23) * invDet;
+      tmp[5] =  (m11 * d34 + m13 * d41 + m14 * d13) * invDet;
+      tmp[6] = -(m11 * d24 + m12 * d41 + m14 * d12) * invDet;
+      tmp[7] =  (m11 * d23 - m12 * d13 + m13 * d12) * invDet;
+
+      /* Pre-compute 2x2 dets for first two rows when computing */
+      /* cofactors of last two rows. */
+      d12 = m11*m22-m21*m12;
+      d13 = m11*m23-m21*m13;
+      d23 = m12*m23-m22*m13;
+      d24 = m12*m24-m22*m14;
+      d34 = m13*m24-m23*m14;
+      d41 = m14*m21-m24*m11;
+
+      tmp[8] =  (m42 * d34 - m43 * d24 + m44 * d23) * invDet;
+      tmp[9] = -(m41 * d34 + m43 * d41 + m44 * d13) * invDet;
+      tmp[10] =  (m41 * d24 + m42 * d41 + m44 * d12) * invDet;
+      tmp[11] = -(m41 * d23 - m42 * d13 + m43 * d12) * invDet;
+      tmp[12] = -(m32 * d34 - m33 * d24 + m34 * d23) * invDet;
+      tmp[13] =  (m31 * d34 + m33 * d41 + m34 * d13) * invDet;
+      tmp[14] = -(m31 * d24 + m32 * d41 + m34 * d12) * invDet;
+      tmp[15] =  (m31 * d23 - m32 * d13 + m33 * d12) * invDet;
+
+      memcpy(out, tmp, 16*sizeof(GLdouble));
+   }
+
+#undef m11
+#undef m12
+#undef m13
+#undef m14
+#undef m21
+#undef m22
+#undef m23
+#undef m24
+#undef m31
+#undef m32
+#undef m33
+#undef m34
+#undef m41
+#undef m42
+#undef m43
+#undef m44
+#undef MAT
+}
+
+void GLScene::project() {
+  glMatrixMode(GL_PROJECTION);
+  glLoadIdentity();
+  top_ = tan(FieldOfView/360*PI)*Near;
+  right_ = top_*Aspect;
+  left_ = -right_;
+  bottom_ = -top_;
+  //glFrustum(left_, right_, bottom_, top_, Near, ViewSize+Near); 
+  //gluPerspective(FieldOfView,Aspect,Near,ViewSize+Near);
+  glOrtho(left_, right_, bottom_, top_, Near, ViewSize+Near);
+  glMatrixMode(GL_MODELVIEW);
+}
+
+bool GLScene::on_motion_notify_event(GdkEventMotion* event) {
+  double x(event->x);
+  double y(event->y);
+  double dx(x-mouse_x_);
+  double dy(y-mouse_y_);
+  if(dx == 0 && dy == 0) {
+    return true;
+  }
+  mouse_x_ = x;
+  mouse_y_ = y;
+  bool changed(false);
+  if(is_mouse_zoom_) {
+    FieldOfView *= pow(1.05, dy/4.0);
+    if(FieldOfView > 180) {
+      FieldOfView = 180;
+    }
+    project();
+    changed = true;
+  }
+  else if(is_mouse_rotate_) {
+    double ax(dy);
+    double ay(dx);
+    double az(0);
+    GLint viewport[4];
+    glGetIntegerv(GL_VIEWPORT, viewport);
+    double len(sqrt(ax*ax+ay*ay+az*az));
+    double angle(len/float(viewport[2]+1)*180.0);
+    GLdouble m[16];
+    GLdouble inv[16];
+    glGetDoublev(GL_MODELVIEW_MATRIX, m);
+    invertMatrix(m, inv);
+    double bx(inv[0]*ax + inv[4]*ay + inv[8]*az);
+    double by(inv[1]*ax + inv[5]*ay + inv[9]*az);
+    double bz(inv[2]*ax + inv[6]*ay + inv[10]*az);
+
+    xAngle += bx*angle/len;
+    normalizeAngle(xAngle);
+    yAngle += by*angle/len;
+    normalizeAngle(yAngle);
+    zAngle += bz*angle/len;
+    normalizeAngle(zAngle);
+
+    glTranslatef(mid_point_.x, mid_point_.y, mid_point_.z);
+    glRotatef(angle,bx,by,bz);
+    glTranslatef(-mid_point_.x, -mid_point_.y, -mid_point_.z);
+    is_mouse_rotated_ = true;
+
+    m_control_->setXangle(xAngle);
+    m_control_->setYangle(yAngle);
+    m_control_->setZangle(zAngle);
+    isShownSurface = false;
+    changed = true;
+  }
+  else if(is_mouse_pan_) {
+    double px, py, pz;
+    set_position(x, y, px, py, pz);
+    double m[16];
+    glMatrixMode(GL_MODELVIEW);
+    glGetDoublev(GL_MODELVIEW_MATRIX, m);
+    glLoadIdentity();
+    glTranslatef(px-mouse_drag_pos_x_,py-mouse_drag_pos_y_,
+                 pz-mouse_drag_pos_z_);
+    glMultMatrixd(m);
+    mouse_drag_pos_x_ = px;
+    mouse_drag_pos_y_ = py;
+    mouse_drag_pos_z_ = pz;
+    changed = true;
+  }
+  if(changed) {
+    invalidate();
+  }
+  return true;
+}
+
+
+bool GLScene::on_button_release_event(GdkEventButton* event) {
+  bool left(get_is_button(event, 1, GDK_BUTTON1_MASK));
+  bool middle(get_is_button(event, 2, GDK_BUTTON2_MASK));
+  bool right(get_is_button(event, 3, GDK_BUTTON3_MASK));
+  is_mouse_rotate_ = left and not (middle or right);
+  is_mouse_zoom_ = middle or (left and right);
+  is_mouse_pan_ = right;// and get_is_event_masked(event, GDK_CONTROL_MASK);
+  double x(event->x);
+  mouse_x_ = x;
+  double y(event->y);
+  mouse_y_ = y;
+  set_position(x, y, mouse_drag_pos_x_, mouse_drag_pos_y_, mouse_drag_pos_z_);
+  queue_draw();
+  return true;
+}
+
+bool GLScene::on_scroll_event(GdkEventScroll* scroll_event) {
+  double s(0); 
+  if(scroll_event->direction == GDK_SCROLL_UP) {
+    zoomIn();
+  }
+  else {
+    zoomOut();
+  }
+}
+
+bool GLScene::on_key_press_event(GdkEventKey* key_event) {
+
+}
+
 GLScene::~GLScene()
 {
-}
-
-void GLScene::setScreenWidth(unsigned int aWidth )
-{
-  theScreenWidth = aWidth;
-  set_size_request(theScreenWidth, theScreenHeight);
-  queue_draw();
-}
-
-void GLScene::setScreenHeight(unsigned int aHeight )
-{
-  theScreenHeight = aHeight;
-  set_size_request(theScreenWidth, theScreenHeight);
-  queue_draw();
 }
 
 void GLScene::setXUpBound(unsigned int aBound )
@@ -548,12 +821,12 @@ bool GLScene::getSpeciesVisibility(unsigned int id)
 
 void GLScene::setControlBox(ControlBox* aControl)
 {
-  m_control = aControl;
+  m_control_ = aControl;
 }
 
-void GLScene::setReverse(bool isReverse)
+void GLScene::set_is_forward(bool is_forward)
 {
-  m_RunReverse = isReverse;
+  is_forward_ = is_forward;
 }
 
 Color GLScene::getSpeciesColor(unsigned int id)
@@ -605,7 +878,7 @@ void GLScene::on_realize()
   glColorMaterial( GL_FRONT_AND_BACK, GL_DIFFUSE );
   glEnable(GL_COLOR_MATERIAL);
   glMatrixMode(GL_MODELVIEW);
-  glTranslatef(-ViewMidx,-ViewMidy,-ViewMidz); 
+  glTranslatef(-mid_point_.x,-mid_point_.y,-mid_point_.z); 
   if(theMeanCount)
     {
       //for GFP visualization:
@@ -614,7 +887,31 @@ void GLScene::on_realize()
     }
   else
     {
+      GLfloat LightAmbient[]= {0.,0.,0.,1.}; 
+      GLfloat LightDiffuse[]= {1.,1.,1.,1.};
+      GLfloat LightSpecular[]= {0.7,0.7,0.7,1.};
+      GLfloat LightPosition[]= {1.,1.,1.,0.};
+      GLfloat MaterialAmbient[]= {.7,.7,.7,1.}; 
+      GLfloat MaterialDiffuse[]= {.8,.8,.8,1.};
+      GLfloat MaterialSpecular[]= {1.,1.,1.,1.};
+      GLfloat Shininess(100.0);
       //for 3D molecules:
+      glLightfv(GL_LIGHT0,GL_AMBIENT, LightAmbient);
+      glLightfv(GL_LIGHT0,GL_DIFFUSE, LightDiffuse);
+      glLightfv(GL_LIGHT0,GL_SPECULAR, LightSpecular);
+      glLightfv(GL_LIGHT0,GL_POSITION, LightPosition);
+      glMaterialfv(GL_FRONT,GL_AMBIENT, MaterialAmbient);
+      glMaterialfv(GL_FRONT,GL_DIFFUSE, MaterialDiffuse);
+      glMaterialfv(GL_FRONT,GL_SPECULAR, MaterialSpecular);
+      glMaterialf(GL_FRONT,GL_SHININESS, Shininess);
+      glEnable(GL_LIGHTING);
+      glEnable(GL_LIGHT0);
+      glDepthFunc(GL_LESS);
+      glEnable(GL_DEPTH_TEST);
+      glEnable(GL_NORMALIZE);
+      glEnable(GL_COLOR_MATERIAL);
+
+      /*
       glEnable(GL_LIGHTING);
       GLfloat LightAmbient[]= { 0.8, 0.8, 0.8, 1 }; 
       GLfloat LightDiffuse[]= { 1, 1, 1, 1 };
@@ -631,7 +928,7 @@ void GLScene::on_realize()
     }
   GLUquadricObj* qobj = gluNewQuadric();
   gluQuadricDrawStyle(qobj, GLU_FILL);
-  theGLIndex = glGenLists(theTotalSpeciesSize);
+  theGLIndex = glGenLists(theTotalSpeciesSize+1);
   for(unsigned int i(theGLIndex); i != theTotalSpeciesSize+theGLIndex; ++i)
     {
       glNewList(i, GL_COMPILE);
@@ -642,7 +939,6 @@ void GLScene::on_realize()
       else
         {
           gluSphere(qobj, theRadii[i-theGLIndex], 10, 10);
-          //gluSphere(qobj, theRadii[i-theGLIndex], 10, 10);
         }
       glEndList();
     }
@@ -651,11 +947,12 @@ void GLScene::on_realize()
   pango_ft2_font_map_set_resolution (PANGO_FT2_FONT_MAP(fontmap), 72, 72);
   ft2_context = Glib::wrap(pango_font_map_create_context(fontmap));
   /*
-  glNewList(BOX, GL_COMPILE);
-  //drawBox(0,theRealColSize,0,theRealLayerSize,0,theRealRowSize);
+  glNewList(theTotalSpeciesSize+theGLIndex, GL_COMPILE);
+  drawBox(0,theRealColSize,0,theRealLayerSize,0,theRealRowSize);
   glEndList();
   */
   glwindow->gl_end();
+  step();
 }
 
 
@@ -733,10 +1030,17 @@ bool GLScene::on_expose_event(GdkEventExpose* event)
       glDisable(GL_LIGHTING);
       (this->*thePlotFunction)();
     }
-  if(showSurface)
-    {
-      rotateMidAxisAbs(90, 0, 1, 0);
+  if(showSurface && !isShownSurface) {
+    resetView();
+    rotateMidAxisAbs(90, 0, 1, 0);
+    isShownSurface = true;
     }
+  else if(!showSurface && isShownSurface) {
+    resetView();
+    rotateMidAxisAbs(0, 0, 1, 0);
+    isShownSurface = false;
+  }
+
   if(showTime)
     {
       drawTime();
@@ -918,11 +1222,65 @@ void GLScene::drawBox(GLfloat xlo, GLfloat xhi, GLfloat ylo, GLfloat yhi,
   glEnd();
 
   glBegin(GL_LINES);
-  glVertex3f(xlo,ylo,zhi);glVertex3f(xhi,ylo,zhi);
-  glVertex3f(xlo,yhi,zhi);glVertex3f(xhi,yhi,zhi);
-  glVertex3f(xlo,yhi,zlo);glVertex3f(xhi,yhi,zlo);
+  glVertex3f(xlo,ylo,zhi);
+  glVertex3f(xhi,ylo,zhi);
+  glVertex3f(xlo,yhi,zhi);
+  glVertex3f(xhi,yhi,zhi);
+  glVertex3f(xlo,yhi,zlo);
+  glVertex3f(xhi,yhi,zlo);
   glEnd();
 }
+
+void GLScene::resetView()
+{
+  GLfloat width(get_width());
+  GLfloat height(get_height());
+  Aspect = width/height;
+  glViewport(0, 0, width, height);
+  FieldOfView=45;
+  Xtrans = 0;
+  Ytrans = 0;
+  if(width >= height) {
+    Near = ViewSize/init_zoom_/tan(FieldOfView*PI/180.0/2.0);
+  }
+  else {
+    Near = ViewSize/init_zoom_/tan(FieldOfView*Aspect*PI/180.0/2.0);
+  }
+  project();
+  glLoadIdentity();
+  glTranslatef(-mid_point_.x, -mid_point_.y, -mid_point_.z-ViewSize/2.0-Near);
+  invalidate();
+  xAngle = 0;
+  yAngle = 0;
+  zAngle = 0;
+  m_control_->setXangle(xAngle);
+  m_control_->setYangle(yAngle);
+  m_control_->setZangle(zAngle);
+  isShownSurface = false;
+}
+
+
+void GLScene::configure() {
+
+  GLfloat width(get_width());
+  GLfloat height(get_height());
+  GLfloat nearold(Near);
+  GLfloat m[16];
+  Aspect = width/height;
+  glViewport(0, 0, width, height);
+  if(width >= height) {
+    Near = ViewSize/init_zoom_/tan(FieldOfView*PI/180.0/2.0);
+  }
+  else {
+    Near = ViewSize/init_zoom_/tan(FieldOfView*Aspect*PI/180.0/2.0);
+  }
+  project();
+  glGetFloatv(GL_MODELVIEW_MATRIX, m);
+  glLoadIdentity();
+  glTranslatef(0, 0, nearold-Near);
+  glMultMatrixf(m);
+}
+
 
 bool GLScene::on_configure_event(GdkEventConfigure* event)
 {
@@ -931,29 +1289,15 @@ bool GLScene::on_configure_event(GdkEventConfigure* event)
     {
       return false;
     }
-  GLfloat w = get_width();
-  GLfloat h = get_height();
-  GLfloat nearold = Near;
-  GLfloat m[16];
-  Aspect = w/h;
-  glViewport(0, 0, static_cast<GLsizei>(w), static_cast<GLsizei>(h));
-  if(w>=h) Near=ViewSize/2.0/tan(FieldOfView*PI/180.0/2.0);
-  else Near=ViewSize/2.0/tan(FieldOfView*Aspect*PI/180.0/2.0);
-  glMatrixMode(GL_PROJECTION);
-  glLoadIdentity();
-  gluPerspective(FieldOfView,Aspect,Near,ViewSize+Near); 
-  glMatrixMode(GL_MODELVIEW);
-  glGetFloatv(GL_MODELVIEW_MATRIX,m);
-  glLoadIdentity();
-  glTranslatef(0,0,nearold-Near);
-  glMultMatrixf(m);
+  configure();
+
   glwindow->gl_end();
-  return true;
+  return false;
 }
 
-bool GLScene::loadCoords(std::streampos& aStreamPos)
+bool GLScene::loadCoords(std::streampos& begin_pos)
 {
-  aStreamPos = theFile.tellg();
+  begin_pos = theFile.tellg();
   if(theFile.read((char*) (&theCurrentTime), sizeof(theCurrentTime)).fail())
     {
       return false;
@@ -1044,17 +1388,16 @@ bool GLScene::loadCoords(std::streampos& aStreamPos)
           return false;
         }
     }
-  ++m_stepCnt;
-  if(unsigned(m_stepCnt) > theStreamPosList.size())
+  if(frame_cnt_ == int(frames_.size())-1)
     {
-      theStreamPosList.push_back(aStreamPos);
+      frames_.push_back(theFile.tellg());
     }
   return true;
 }
 
-bool GLScene::loadMeanCoords(std::streampos& aStreamPos)
+bool GLScene::loadMeanCoords(std::streampos& begin_pos)
 {
-  aStreamPos = theFile.tellg();
+  begin_pos = theFile.tellg();
   if(theFile.read((char*) (&theCurrentTime), sizeof(theCurrentTime)).fail())
     {
       return false;
@@ -1095,10 +1438,9 @@ bool GLScene::loadMeanCoords(std::streampos& aStreamPos)
           return false;
         }
     }
-  ++m_stepCnt;
-  if(unsigned(m_stepCnt) > theStreamPosList.size())
+  if(frame_cnt_ == int(frames_.size())-1)
     {
-      theStreamPosList.push_back(aStreamPos);
+      frames_.push_back(theFile.tellg());
     }
   return true;
 }
@@ -1217,9 +1559,9 @@ void GLScene::plotMean3DCubicMolecules()
                 (theCoords[j][k]%(theRowSize*theLayerSize))/theRowSize;
               row =
                 (theCoords[j][k]%(theRowSize*theLayerSize))%theRowSize;
-              y = layer*2*theRadius + theRadius;
-              z = row*2*theRadius + theRadius;
-              x = col*2*theRadius + theRadius; 
+              y = layer*2*theRadius;
+              z = row*2*theRadius;
+              x = col*2*theRadius; 
               bool isBound(x <= theXUpBound[j] && x >= theXLowBound[j] &&
                            y <= theYUpBound[j] && y >= theYLowBound[j] &&
                            z <= theZUpBound[j] && z >= theZLowBound[j]);
@@ -1250,12 +1592,15 @@ void GLScene::plot3DHCPMolecules()
               layer = theCoords[j][k]/(theRowSize*theColSize)-theOriCol; 
               col = (theCoords[j][k]%(theRowSize*theColSize))/theRowSize;
               row = (theCoords[j][k]%(theRowSize*theColSize))%theRowSize;
-              y = theRadius + row*2*theRadius + theRadius*((layer+col)%2);
-              z = theRadius + layer*_hcpZ;
-              x = theRadius + col*_hcpX + _hcpO*(layer%2);
-              bool isBound(x <= theXUpBound[j] && x >= theXLowBound[j] &&
-                           y <= theYUpBound[j] && y >= theYLowBound[j] &&
-                           z <= theZUpBound[j] && z >= theZLowBound[j]);
+              y = row*2*theRadius + theRadius*((layer+col)%2);
+              z = layer*hcpZ_;
+              x = col*hcpX_ + hcpO_*(layer%2);
+              bool isBound(col <= theXUpBound[j] &&
+                           col >= theXLowBound[j] &&
+                           layer <= theYUpBound[j] &&
+                           layer >= theYLowBound[j] &&
+                           row <= theZUpBound[j] &&
+                           row >= theZLowBound[j]);
               if((isInvertBound && isBound) || (!isInvertBound && !isBound))
                 {
                   glPushMatrix();
@@ -1275,9 +1620,9 @@ void GLScene::plot3DHCPMolecules()
           glColor3f(clr.r, clr.g, clr.b); 
           for( unsigned int k(0); k!=theOffLatticeMoleculeSize[j]; ++k )
             {
-              x = (thePoints[j][k].x)+theRadius;
-              y = (thePoints[j][k].y)+theRadius;
-              z = (thePoints[j][k].z)+theRadius;
+              x = (thePoints[j][k].x);
+              y = (thePoints[j][k].y);
+              z = (thePoints[j][k].z);
               bool isBound(x <= theXUpBound[j] && x >= theXLowBound[j] &&
                            y <= theYUpBound[j] && y >= theYLowBound[j] &&
                            z <= theZUpBound[j] && z >= theZLowBound[j]);
@@ -1291,6 +1636,12 @@ void GLScene::plot3DHCPMolecules()
             }
         }
     }
+  /*
+  glPushMatrix();
+  glTranslatef(0,0,0);
+  glCallList(theTotalSpeciesSize+theGLIndex);
+  glPopMatrix();
+  */
 }
 
 void GLScene::plot3DCubicMolecules()
@@ -1310,9 +1661,9 @@ void GLScene::plot3DCubicMolecules()
                 (theCoords[j][k]%(theRowSize*theLayerSize))/theRowSize;
               row =
                 (theCoords[j][k]%(theRowSize*theLayerSize))%theRowSize;
-              y = layer*2*theRadius + theRadius;
-              z = row*2*theRadius + theRadius;
-              x = col*2*theRadius + theRadius; 
+              y = layer*2*theRadius;
+              z = row*2*theRadius;
+              x = col*2*theRadius; 
               if(!( x <= theXUpBound[j] && x >= theXLowBound[j] &&
                   y <= theYUpBound[j] && y >= theYLowBound[j] &&
                   z <= theZUpBound[j] && z >= theZLowBound[j]))
@@ -1334,9 +1685,9 @@ void GLScene::plot3DCubicMolecules()
           glColor3f(clr.r, clr.g, clr.b); 
           for( unsigned int k(0); k!=theOffLatticeMoleculeSize[j]; ++k )
             {
-              x = (thePoints[j][k].x)+theRadius;
-              y = (thePoints[j][k].y)+theRadius;
-              z = (thePoints[j][k].z)+theRadius;
+              x = (thePoints[j][k].x);
+              y = (thePoints[j][k].y);
+              z = (thePoints[j][k].z);
               if(!( x <= theXUpBound[m] && x >= theXLowBound[m] &&
                   y <= theYUpBound[m] && y >= theYLowBound[m] &&
                   z <= theZUpBound[m] && z >= theZLowBound[m]))
@@ -1367,9 +1718,9 @@ void GLScene::plotHCPPoints()
               layer = theCoords[j][k]/(theRowSize*theColSize)-theOriCol; 
               col = (theCoords[j][k]%(theRowSize*theColSize))/theRowSize;
               row = (theCoords[j][k]%(theRowSize*theColSize))%theRowSize;
-              y = theRadius + row*2*theRadius + theRadius*((layer+col)%2);
-              z = theRadius + layer*_hcpZ;
-              x = theRadius + col*_hcpX + _hcpO*(layer%2);
+              y = row*2*theRadius + theRadius*((layer+col)%2);
+              z = layer*hcpZ_;
+              x = col*hcpX_ + hcpO_*(layer%2);
               bool isBound(x <= theXUpBound[j] && x >= theXLowBound[j] &&
                            y <= theYUpBound[j] && y >= theYLowBound[j] &&
                            z <= theZUpBound[j] && z >= theZLowBound[j]);
@@ -1389,9 +1740,9 @@ void GLScene::plotHCPPoints()
           glColor3f(clr.r, clr.g, clr.b); 
           for( unsigned int k(0); k!=theOffLatticeMoleculeSize[j]; ++k )
             {
-              x = (thePoints[j][k].x)+theRadius;
-              y = (thePoints[j][k].y)+theRadius;
-              z = (thePoints[j][k].z)+theRadius;
+              x = (thePoints[j][k].x);
+              y = (thePoints[j][k].y);
+              z = (thePoints[j][k].z);
               bool isBound(x <= theXUpBound[j] && x >= theXLowBound[j] &&
                            y <= theYUpBound[j] && y >= theYLowBound[j] &&
                            z <= theZUpBound[j] && z >= theZLowBound[j]);
@@ -1423,9 +1774,9 @@ void GLScene::plotCubicPoints()
                 (theCoords[j][k]%(theRowSize*theLayerSize))/theRowSize;
               row =
                 (theCoords[j][k]%(theRowSize*theLayerSize))%theRowSize;
-              y = layer*2*theRadius + theRadius;
-              z = row*2*theRadius + theRadius;
-              x = col*2*theRadius + theRadius; 
+              y = layer*2*theRadius;
+              z = row*2*theRadius;
+              x = col*2*theRadius; 
               if(!( x <= theXUpBound[j] && x >= theXLowBound[j] &&
                   y <= theYUpBound[j] && y >= theYLowBound[j] &&
                   z <= theZUpBound[j] && z >= theZLowBound[j]))
@@ -1444,9 +1795,9 @@ void GLScene::plotCubicPoints()
           glColor3f(clr.r, clr.g, clr.b); 
           for( unsigned int k(0); k!=theOffLatticeMoleculeSize[j]; ++k )
             {
-              x = (thePoints[j][k].x)+theRadius;
-              y = (thePoints[j][k].y)+theRadius;
-              z = (thePoints[j][k].z)+theRadius;
+              x = (thePoints[j][k].x);
+              y = (thePoints[j][k].y);
+              z = (thePoints[j][k].z);
               if(!( x <= theXUpBound[m] && x >= theXLowBound[m] &&
                   y <= theYUpBound[m] && y >= theYLowBound[m] &&
                   z <= theZUpBound[m] && z >= theZLowBound[m]))
@@ -1542,10 +1893,7 @@ void GLScene::translate(int x, int y, int z)
 void GLScene::zoomIn()
 { 
   FieldOfView/=1.05;
-  glMatrixMode(GL_PROJECTION);
-  glLoadIdentity();
-  gluPerspective(FieldOfView,Aspect,Near,ViewSize+Near);
-  glMatrixMode(GL_MODELVIEW);
+  project();
   invalidate();
 }
 
@@ -1556,41 +1904,40 @@ void GLScene::zoomOut()
     {
       FieldOfView=180;
     }
-  glMatrixMode(GL_PROJECTION);
-  glLoadIdentity();
-  gluPerspective(FieldOfView,Aspect,Near,ViewSize+Near);
-  glMatrixMode(GL_MODELVIEW);
+  project();
   invalidate();
+}
+
+int GLScene::get_frame_cnt() {
+  return frame_cnt_;
+}
+
+void GLScene::set_frame_cnt(int frame_cnt) {
+  if(is_playing_) {
+    is_playing_ = false;
+    timeout_remove();
+  }
+  if(is_forward_) {
+    frame_cnt_ = std::max(frame_cnt-1, 0);
+  }
+  else {
+    frame_cnt_ = std::min(frame_cnt+1, int(frames_.size())+1);
+  }
+  on_timeout();
 }
 
 bool GLScene::on_timeout()
 {
-  if(m_RunReverse)
-    {
-      if(m_stepCnt > 1)
-        {
-          m_stepCnt -= 2;
-        }
-      else
-        {
-          m_stepCnt = 0;
-        }
-      if(theStreamPosList.size())
-        {
-          theFile.seekg(theStreamPosList[m_stepCnt]);
-        }
-    }
+  inc_dec_frame_cnt();
+  theFile.seekg(frames_[frame_cnt_]);
   std::streampos aCurrStreamPos;
-  if(!(this->*theLoadCoordsFunction)(aCurrStreamPos))
-    {
-      theFile.clear();
-      theFile.seekg(aCurrStreamPos);
-    }
-  char buffer[50];
-  sprintf(buffer, "%d", m_stepCnt-1);
-  m_control->setStep(buffer);
-  sprintf(buffer, "%f", theCurrentTime);
-  m_control->setTime(buffer);
+  if(!(this->*theLoadCoordsFunction)(aCurrStreamPos)) { 
+    theFile.clear();
+    theFile.seekg(aCurrStreamPos);
+    frame_cnt_ = std::max(frame_cnt_-1, 1);
+  }
+  m_control_->set_frame_cnt(frame_cnt_);
+  m_control_->setTime(theCurrentTime);
   invalidate();
   if(startRecord)
     {
@@ -1602,13 +1949,21 @@ bool GLScene::on_timeout()
   return true;
 }
 
+void GLScene::inc_dec_frame_cnt() {
+  if(is_forward_) {
+    frame_cnt_ = std::min(frame_cnt_+1, int(frames_.size()));
+  }
+  else {
+    frame_cnt_ = std::max(frame_cnt_-1, 1);
+  }
+}
+
 void GLScene::step()
 {
-  if(m_Run)
-    {
-      m_Run = false;
-      timeout_remove();
-    }
+  if(is_playing_) {
+    is_playing_ = false;
+    timeout_remove();
+  }
   on_timeout();
 }
 
@@ -1627,61 +1982,43 @@ void GLScene::timeout_remove()
 
 bool GLScene::on_map_event(GdkEventAny* event)
 {
-  if (m_Run)
+  if(is_playing_) {
     timeout_add();
-
+  }
   return true;
 }
 
 bool GLScene::on_unmap_event(GdkEventAny* event)
 {
   timeout_remove();
-
   return true;
 }
 
 bool GLScene::on_visibility_notify_event(GdkEventVisibility* event)
 {
-  if (m_Run)
-    {
-      if (event->state == GDK_VISIBILITY_FULLY_OBSCURED)
-        timeout_remove();
-      else
-        timeout_add();
+  if(is_playing_) {
+    if (event->state == GDK_VISIBILITY_FULLY_OBSCURED) {
+      timeout_remove();
     }
-
+    else {
+      timeout_add();
+    }
+  }
   return true;
-}
-
-void GLScene::resetView()
-{
-  GLfloat w = get_width();
-  GLfloat h = get_height();
-  Aspect = w/h;
-  glViewport(0, 0, static_cast<GLsizei>(w), static_cast<GLsizei>(h));
-  FieldOfView=45;
-  Xtrans=Ytrans=0;
-  if(w>=h) Near=ViewSize/2.0/tan(FieldOfView*PI/180.0/2.0);
-  else Near=ViewSize/2.0/tan(FieldOfView*Aspect*PI/180.0/2.0);
-  glMatrixMode(GL_PROJECTION);
-  glLoadIdentity();
-  gluPerspective(FieldOfView,Aspect,Near,ViewSize+Near);
-  glMatrixMode(GL_MODELVIEW);
-  glLoadIdentity();
-  glTranslatef(-ViewMidx,-ViewMidy,-ViewMidz);
-  glTranslatef(0,0,-ViewSize/2.0-Near);
-  invalidate();
-  xAngle = 0;
-  yAngle = 0;
-  zAngle = 0;
-  m_control->setXangle(xAngle);
-  m_control->setYangle(yAngle);
-  m_control->setZangle(zAngle);
 }
 
 void GLScene::resetBound()
 {
-
+  for(unsigned int i(0); i!=theTotalSpeciesSize; ++i )
+    {
+      theXUpBound[i] = 0;
+      theXLowBound[i] = 0;
+      theYUpBound[i] = theLayerSize;
+      theYLowBound[i] = 0;
+      theZUpBound[i] = theRowSize;
+      theZLowBound[i] = 0;
+    }
+  queue_draw();
 }
 
 void GLScene::rotateMidAxis(int aMult, int x, int y, int z)
@@ -1699,24 +2036,79 @@ void GLScene::rotateMidAxis(int aMult, int x, int y, int z)
     {
       xAngle += aMult*theRotateAngle;
       normalizeAngle(xAngle);
-      m_control->setXangle(xAngle);
+      m_control_->setXangle(xAngle);
     }
   if(y)
     {
       yAngle += aMult*theRotateAngle;
       normalizeAngle(yAngle);
-      m_control->setYangle(yAngle);
+      m_control_->setYangle(yAngle);
     }
   if(z)
     {
       zAngle += aMult*theRotateAngle;
       normalizeAngle(zAngle);
-      m_control->setZangle(zAngle);
+      m_control_->setZangle(zAngle);
     }
 }
 
 void GLScene::rotateMidAxisAbs(double angle, int x, int y, int z)
 {
+  if(is_mouse_rotated_) {
+    is_mouse_rotated_ = false;
+    return;
+  }
+
+  if(x && angle == xAngle) {
+    return;
+  }
+  if(y && angle == yAngle) {
+    return;
+  }
+  if(z && angle == zAngle) {
+    return;
+  }
+  double a(0);
+  if(x)
+    {
+      a = angle-xAngle;
+      xAngle = angle;
+    }
+  else if(y)
+    {
+      a = angle-yAngle;
+      yAngle = angle;
+    }
+  else if(z)
+    {
+      a = angle-zAngle;
+      zAngle = angle;
+    }
+  double ax(x);
+  double ay(y);
+  double az(z);
+  GLint viewport[4];
+  glGetIntegerv(GL_VIEWPORT, viewport);
+  GLdouble m[16];
+  GLdouble inv[16];
+  glGetDoublev(GL_MODELVIEW_MATRIX, m);
+  invertMatrix(m, inv);
+  double bx(inv[0]*ax + inv[4]*ay + inv[8]*az);
+  double by(inv[1]*ax + inv[5]*ay + inv[9]*az);
+  double bz(inv[2]*ax + inv[6]*ay + inv[10]*az);
+
+  glTranslatef(mid_point_.x, mid_point_.y, mid_point_.z);
+  glRotatef(a,bx,by,bz);
+  glTranslatef(-mid_point_.x, -mid_point_.y, -mid_point_.z);
+
+  m_control_->setXangle(xAngle);
+  m_control_->setYangle(yAngle);
+  m_control_->setZangle(zAngle);
+  isShownSurface = false;
+  invalidate();
+
+
+  /*
   GLfloat m[16];
   glMatrixMode(GL_MODELVIEW);
   glGetFloatv(GL_MODELVIEW_MATRIX,m);
@@ -1726,23 +2118,24 @@ void GLScene::rotateMidAxisAbs(double angle, int x, int y, int z)
     {
       glRotatef(angle-xAngle,x,y,z);
       xAngle = angle;
-      m_control->setXangle(xAngle);
+      m_control_->setXangle(xAngle);
     }
   if(y)
     {
       glRotatef(angle-yAngle,x,y,z);
       yAngle = angle;
-      m_control->setYangle(yAngle);
+      m_control_->setYangle(yAngle);
     }
   if(z)
     {
       glRotatef(angle-zAngle,x,y,z);
       zAngle = angle;
-      m_control->setZangle(zAngle);
+      m_control_->setZangle(zAngle);
     }
   glTranslatef(-Xtrans,-Ytrans,+(Near+ViewSize/2.0));
   glMultMatrixf(m);
   invalidate();
+  */
 }
 
 void GLScene::normalizeAngle(double &angle)
@@ -1757,58 +2150,56 @@ void GLScene::normalizeAngle(double &angle)
     }
 }
 
+bool GLScene::get_is_playing() {
+  return is_playing_;
+}
+
 void GLScene::pause()
 {
-  m_Run = !m_Run;
-  if(m_Run)
-    {
-      timeout_add();
-    }
-  else
-    {
-      timeout_remove();
-      invalidate();
-    }
+  is_playing_ = !is_playing_;
+  if(is_playing_) {
+    timeout_add();
+  }
+  else {
+    timeout_remove();
+    invalidate();
+  }
 }
 
 void GLScene::play()
 {
-  m_Run = true;
+  is_playing_ = true;
   timeout_add();
 }
 
-ControlBox::ControlBox(GLScene *anArea, Gtk::Table *aTable) :
-  m_area(anArea),
+ControlBox::ControlBox(GLScene& anArea, Gtk::Table& aTable) :
+  m_area_(anArea),
   m_table(10, 10),
-  m_areaTable(aTable),
+  m_area_table_(aTable),
   theDepthAdj( 0, -200, 130, 5, 0, 0 ),
-  theHeightAdj( SCREEN_HEIGHT, 0, 1080, 1, 0, 0 ),
-  theWidthAdj( SCREEN_WIDTH, 0, 1920, 1, 0, 0 ),
-  theXAdj( 0, -180, 180, 5, 20, 0 ),
+  theXAdj( 0, -180, 180, 1, 20, 0 ),
   theXLowBoundAdj( 0, 0, 100, 1, 0, 0 ),
   theXUpBoundAdj( 100, 0, 0, 1, 0, 0 ),
-  theYAdj( 0, -180, 180, 5, 20, 0 ),
+  theYAdj( 0, -180, 180, 1, 20, 0 ),
   theYLowBoundAdj( 0, 0, 100, 1, 0, 0 ),
   theYUpBoundAdj( 100, 0, 100, 1, 0, 0 ),
-  theZAdj( 0, -180, 180, 5, 20, 0 ),
+  theZAdj( 0, -180, 180, 1, 20, 0 ),
   theZLowBoundAdj( 0, 0, 100, 1, 0, 0 ),
   theZUpBoundAdj( 100, 0, 100, 1, 0, 0 ),
-  theButtonResetTime( "Reset Time" ),
+  theResetTimeButton( "Reset Time" ),
   theResetBoundButton( "Reset" ),
   theResetDepthButton( "Reset" ),
-  theResetRotButton( "Reset" ),
+  theResetRotButton( "Reset View" ),
   theCheck3DMolecule( "Show 3D Molecules" ),
-  theCheckFix( "Fix rotation" ),
+  //theCheckFix( "Fix rotation" ),
   theCheckInvertBound( "Invert Bounding" ),
   theCheckShowSurface( "Show Surface" ),
   theCheckShowTime( "Show Time" ),
   theFrameBoundAdj("Bounding"),
   theFrameLatticeAdj("Zoom"),
   theFrameRotAdj( "Rotation" ),
-  theFrameScreen("Screen"),
+  theFrameScreen("Resolution"),
   theDepthScale( theDepthAdj ),
-  theHeightScale( theHeightAdj ),
-  theWidthScale( theWidthAdj ),
   theXLowBoundScale( theXLowBoundAdj ),
   theXScale( theXAdj ),
   theXUpBoundScale( theXUpBoundAdj ),
@@ -1819,8 +2210,8 @@ ControlBox::ControlBox(GLScene *anArea, Gtk::Table *aTable) :
   theZScale( theZAdj ),
   theZUpBoundScale( theZUpBoundAdj ),
   theDepthLabel( "Depth" ),
-  theHeightLabel( "H" ),
-  theWidthLabel( "W" ),
+  theHeightLabel( "Height:" ),
+  theWidthLabel( "Width:" ),
   theXLabel( "x" ),
   theXLowBoundLabel( "-x" ),
   theXUpBoundLabel( "+x" ),
@@ -1831,8 +2222,6 @@ ControlBox::ControlBox(GLScene *anArea, Gtk::Table *aTable) :
   theZLowBoundLabel( "-z" ),
   theZUpBoundLabel( "+z" ),
   theDepthSpin( theDepthAdj, 0, 0  ),
-  theHeightSpin( theHeightAdj, 0, 0  ),
-  theWidthSpin( theWidthAdj, 0, 0  ),
   theXLowBoundSpin( theXLowBoundAdj, 0, 0  ),
   theXSpin( theXAdj, 0, 0  ),
   theXUpBoundSpin( theXUpBoundAdj, 0, 0  ),
@@ -1842,54 +2231,41 @@ ControlBox::ControlBox(GLScene *anArea, Gtk::Table *aTable) :
   theZLowBoundSpin( theZLowBoundAdj, 0, 0  ),
   theZSpin( theZAdj, 0, 0  ),
   theZUpBoundSpin( theZUpBoundAdj, 0, 0  ),
-  theButtonRecord( "Record Frames" )
+  theRecordButton( "Record Frames" ),
+  progress_adj_(0, 1, std::max(1, int(m_area_.get_frame_size()-2)), 1, 0, 0),
+  progress_spin_( progress_adj_, 0, 0  ),
+  progress_bar_(progress_adj_)
 {
+  m_area_table_.attach(progress_box_, 0, 1, 1, 2, Gtk::SHRINK | Gtk::FILL,
+                       Gtk::SHRINK | Gtk::FILL, 0, 0);
+  progress_box_.pack_start(play_button_, false, false, 2);
+  play_button_.set_stock_id(Gtk::Stock::MEDIA_PLAY);
+  play_button_.signal_clicked().connect( sigc::mem_fun(*this,
+                            &ControlBox::play_or_pause) );
+
+  progress_bar_.set_draw_value(false);
+  progress_box_.pack_start(progress_bar_);
+  progress_spin_.set_width_chars(4);
+  progress_spin_.set_has_frame(false);
+  frame_cnt_label_.set_text("Frame:");
+  progress_box_.pack_start(frame_cnt_label_, false, false, 2);
+  progress_box_.pack_start(progress_spin_, false, false, 2);
+  progress_adj_.signal_value_changed().connect( sigc::mem_fun(*this, 
+                           &ControlBox::progress_changed ) );
+
+
   set_border_width(2);
-  set_size_request(470, SCREEN_HEIGHT);
+  set_size_request(475, SCREEN_HEIGHT);
   set_policy(Gtk::POLICY_AUTOMATIC, Gtk::POLICY_AUTOMATIC);
   add(m_rightBox);
   m_table.set_row_spacings(1);
   m_table.set_col_spacings(2);
-  m_table.attach(m_stepBox, 0, 1, 0, 1, Gtk::FILL,
-                 Gtk::SHRINK | Gtk::FILL, 0, 0 );
   m_rightBox.pack_start(m_table, Gtk::PACK_SHRINK);
   //Create a table on the right that holds the control.
   m_rightBox.pack_start(theBoxCtrl, Gtk::PACK_SHRINK); 
   // Create a frame the will have the rotation adjusters
   // and the Fix and Reset buttons.
 
-  // screen resolution adjuster
-  theBoxCtrl.pack_start( theFrameScreen, false, false, 1 );
-  theBoxInScreen.set_border_width( 3 );
-  theFrameScreen.add(theBoxInScreen);
-  theBoxInScreen.pack_start( theHeightBox, false, false, 1 ); 
-  theBoxInScreen.pack_start( theWidthBox, false, false, 1 ); 
-
-  theHeightLabel.set_width_chars( 2 );
-  theHeightBox.pack_start( theHeightLabel, false, false, 2 );
-  theHeightAdj.set_value( SCREEN_HEIGHT );
-  theHeightAdj.set_upper( 1080 );
-  theHeightAdj.signal_value_changed().connect( sigc::mem_fun(*this, 
-                           &ControlBox::screenChanged ) );
-  theHeightScale.set_draw_value( false );
-  theHeightBox.pack_start( theHeightScale );
-  theHeightSpin.set_width_chars( 4 );
-  theHeightSpin.set_has_frame( false );
-  theHeightSpin.set_editable( true );
-  theHeightBox.pack_start( theHeightSpin, false, false, 2 );
-
-  theWidthLabel.set_width_chars( 2 );
-  theWidthBox.pack_start( theWidthLabel, false, false, 2 );
-  theWidthAdj.set_value( SCREEN_WIDTH );
-  theWidthAdj.set_upper( 1920 );
-  theWidthAdj.signal_value_changed().connect( sigc::mem_fun(*this, 
-                           &ControlBox::screenChanged ) );
-  theWidthScale.set_draw_value( false );
-  theWidthBox.pack_start( theWidthScale );
-  theWidthSpin.set_width_chars( 4 );
-  theWidthSpin.set_has_frame( false );
-  theWidthSpin.set_editable( true );
-  theWidthBox.pack_start( theWidthSpin, false, false, 2 );
 
   /*
   // Create a frame the will have the lattice depth adjuster
@@ -1904,27 +2280,57 @@ ControlBox::ControlBox(GLScene *anArea, Gtk::Table *aTable) :
   //theResetDepthButton.connect( 'clicked', resetDepth );
   the3DMoleculeBox.pack_start( theResetDepthButton ); 
 
-  theCheckShowSurface.signal_toggled().connect( sigc::mem_fun(*this,
-                            &ControlBox::on_showSurface_toggled) );
-  //theCheckShowSurface.set_active();
-  theCheckShowSurface.set_active(false);
-  theBoxCtrl.pack_start( theCheckShowSurface, false, false, 2 );
 
-  theCheckShowTime.signal_toggled().connect( sigc::mem_fun(*this,
-                            &ControlBox::on_showTime_toggled) );
-  theCheckShowTime.set_active();
-  theBoxCtrl.pack_start( theCheckShowTime, false, false, 2 );
   theCheck3DMolecule.signal_toggled().connect( sigc::mem_fun(*this,
                             &ControlBox::on_3DMolecule_toggled) );
   //theCheck3DMolecule.set_active();
   theCheck3DMolecule.set_active(false);
   theBoxCtrl.pack_start( theCheck3DMolecule, false, false, 2 );
-  theButtonResetTime.signal_clicked().connect( sigc::mem_fun(*this,
+
+
+  theCheckShowTime.signal_toggled().connect( sigc::mem_fun(*this,
+                            &ControlBox::on_showTime_toggled) );
+  theCheckShowTime.set_active();
+  theBoxCtrl.pack_start( theCheckShowTime, false, false, 2 );
+
+  /*
+  theCheckShowSurface.signal_toggled().connect( sigc::mem_fun(*this,
+                            &ControlBox::on_showSurface_toggled) );
+  //theCheckShowSurface.set_active();
+  theCheckShowSurface.set_active(false);
+  theBoxCtrl.pack_start( theCheckShowSurface, false, false, 2 );
+  */
+
+  theResetRotButton.signal_clicked().connect( sigc::mem_fun(*this,
+                            &ControlBox::onResetRotation) );
+  theBoxCtrl.pack_start( theResetRotButton, false, false, 2 );
+
+  theResetTimeButton.signal_clicked().connect( sigc::mem_fun(*this,
                             &ControlBox::on_resetTime_clicked) );
-  theBoxCtrl.pack_start( theButtonResetTime, false, false, 2 );
-  theButtonRecord.signal_toggled().connect( sigc::mem_fun(*this,
+  theBoxCtrl.pack_start( theResetTimeButton, false, false, 2 );
+
+  theRecordButton.signal_toggled().connect( sigc::mem_fun(*this,
                             &ControlBox::on_record_toggled) );
-  theBoxCtrl.pack_start( theButtonRecord, false, false, 2 );
+  theBoxCtrl.pack_start( theRecordButton, false, false, 2 );
+
+
+
+  // screen resolution display
+  theBoxCtrl.pack_start( theFrameScreen, false, false, 1 );
+  theBoxInScreen.set_border_width( 3 );
+  theFrameScreen.add(theBoxInScreen);
+  theBoxInScreen.pack_start( theWidthBox, false, false, 1 ); 
+  theBoxInScreen.pack_start( theHeightBox, false, false, 1 ); 
+
+  theHeightLabel.set_width_chars( 6 );
+  theHeightBox.pack_start( theHeightLabel, false, false, 2 );
+  theHeightBox.pack_start( m_height );
+
+  theWidthLabel.set_width_chars( 6 );
+  theWidthBox.pack_start( theWidthLabel, false, false, 2 );
+  theWidthBox.pack_start( m_width );
+
+
   theDepthLabel.set_width_chars( 1 );
   theDepthBox.pack_start( theDepthLabel, false, false, 2 );
   //theDepthAdj.connect( 'value_changed', depthChanged );
@@ -1934,8 +2340,8 @@ ControlBox::ControlBox(GLScene *anArea, Gtk::Table *aTable) :
   theDepthSpin.set_has_frame( false );
   theDepthBox.pack_start( theDepthSpin, false, false, 2 );
 
-  // Create a frame the will have the lattice boundary adjusters
-  // and the Fix and Reset buttons.
+  // Create a frame the will have the lattice boundary adjusters,
+  // Fix and Reset buttons.
   theBoxCtrl.pack_start( theFrameBoundAdj, false, false, 1 );
   theBoxInBound.set_border_width( 3 );
   theFrameBoundAdj.add( theBoxInBound );
@@ -1953,15 +2359,15 @@ ControlBox::ControlBox(GLScene *anArea, Gtk::Table *aTable) :
                             &ControlBox::onResetBound) );
   theBoxBoundFixReset.pack_start( theResetBoundButton );
 
-  unsigned int aLayerSize( m_area->getLayerSize() );
-  unsigned int aColSize( m_area->getColSize() );
-  unsigned int aRowSize( m_area->getRowSize() );
+  unsigned int aColSize(m_area_.getColSize());
+  unsigned int aRowSize(m_area_.getRowSize());
+  unsigned int aLayerSize(m_area_.getLayerSize());
 
   // x up bound
   theXUpBoundLabel.set_width_chars( 2 );
   theXUpBoundBox.pack_start( theXUpBoundLabel, false, false, 2 );
-  theXUpBoundAdj.set_value( aColSize );
   theXUpBoundAdj.set_upper( aColSize );
+  theXUpBoundAdj.set_value(0);
   theXUpBoundAdj.signal_value_changed().connect( sigc::mem_fun(*this, 
                            &ControlBox::xUpBoundChanged ) );
   theXUpBoundScale.set_draw_value( false );
@@ -1974,6 +2380,7 @@ ControlBox::ControlBox(GLScene *anArea, Gtk::Table *aTable) :
   theXLowBoundLabel.set_width_chars( 2 );
   theXLowBoundBox.pack_start( theXLowBoundLabel, false, false, 2 );
   theXLowBoundAdj.set_upper( aColSize );
+  theXLowBoundAdj.set_value(0);
   theXLowBoundAdj.signal_value_changed().connect( sigc::mem_fun(*this, 
                            &ControlBox::xLowBoundChanged ) );
   theXLowBoundScale.set_draw_value( false );
@@ -1985,8 +2392,8 @@ ControlBox::ControlBox(GLScene *anArea, Gtk::Table *aTable) :
   // y up bound
   theYUpBoundLabel.set_width_chars( 2 );
   theYUpBoundBox.pack_start( theYUpBoundLabel, false, false, 2 );
-  theYUpBoundAdj.set_value( aLayerSize );
-  theYUpBoundAdj.set_upper( aLayerSize );
+  theYUpBoundAdj.set_upper( aRowSize );
+  theYUpBoundAdj.set_value( aRowSize );
   theYUpBoundAdj.signal_value_changed().connect( sigc::mem_fun(*this, 
                            &ControlBox::yUpBoundChanged ) );
   theYUpBoundScale.set_draw_value( false );
@@ -1998,7 +2405,8 @@ ControlBox::ControlBox(GLScene *anArea, Gtk::Table *aTable) :
   // y low bound
   theYLowBoundLabel.set_width_chars( 2 );
   theYLowBoundBox.pack_start( theYLowBoundLabel, false, false, 2 );
-  theYLowBoundAdj.set_upper( aLayerSize );
+  theYLowBoundAdj.set_upper( aRowSize );
+  theYLowBoundAdj.set_value(0);
   theYLowBoundAdj.signal_value_changed().connect( sigc::mem_fun(*this, 
                            &ControlBox::yLowBoundChanged ) );
   theYLowBoundScale.set_draw_value( false );
@@ -2010,8 +2418,8 @@ ControlBox::ControlBox(GLScene *anArea, Gtk::Table *aTable) :
   // z up bound
   theZUpBoundLabel.set_width_chars( 2 );
   theZUpBoundBox.pack_start( theZUpBoundLabel, false, false, 2 );
-  theZUpBoundAdj.set_value( aRowSize );
-  theZUpBoundAdj.set_upper( aRowSize );
+  theZUpBoundAdj.set_upper( aLayerSize );
+  theZUpBoundAdj.set_value( aLayerSize );
   theZUpBoundAdj.signal_value_changed().connect( sigc::mem_fun(*this, 
                            &ControlBox::zUpBoundChanged ) );
   theZUpBoundScale.set_draw_value( false );
@@ -2023,7 +2431,8 @@ ControlBox::ControlBox(GLScene *anArea, Gtk::Table *aTable) :
   // z low bound
   theZLowBoundLabel.set_width_chars( 2 );
   theZLowBoundBox.pack_start( theZLowBoundLabel, false, false, 2 );
-  theZLowBoundAdj.set_upper( aRowSize );
+  theZLowBoundAdj.set_upper( aLayerSize );
+  theZLowBoundAdj.set_value(0);
   theZLowBoundAdj.signal_value_changed().connect( sigc::mem_fun(*this, 
                            &ControlBox::zLowBoundChanged ) );
   theZLowBoundScale.set_draw_value( false );
@@ -2042,10 +2451,7 @@ ControlBox::ControlBox(GLScene *anArea, Gtk::Table *aTable) :
   theBoxInFrame.pack_start( theZBox, false, false, 1 );
   theBoxInFrame.pack_start( theBoxRotFixReset, false, false, 1 );
   //theCheckFix.connect( 'toggled', fixRotToggled );
-  theBoxRotFixReset.pack_start( theCheckFix );
-  theResetRotButton.signal_clicked().connect( sigc::mem_fun(*this,
-                            &ControlBox::onResetRotation) );
-  theBoxRotFixReset.pack_start( theResetRotButton );
+  //theBoxRotFixReset.pack_start( theCheckFix );
 
   // X
   theXLabel.set_width_chars( 1 );
@@ -2084,12 +2490,8 @@ ControlBox::ControlBox(GLScene *anArea, Gtk::Table *aTable) :
                            &ControlBox::zRotateChanged ) );
 
   // Time and step counts
-  m_stepLabel.set_text("Step:");
   m_sizeGroup = Gtk::SizeGroup::create(Gtk::SIZE_GROUP_HORIZONTAL);
-  m_sizeGroup->add_widget(m_stepLabel);
-  m_stepBox.pack_start(m_stepLabel, Gtk::PACK_SHRINK);
-  m_stepBox.pack_start(m_steps, Gtk::PACK_SHRINK);
-  m_table.attach(m_timeBox, 0, 1, 1, 2, Gtk::FILL,
+  m_table.attach(m_timeBox, 0, 1, 0, 1, Gtk::FILL,
                  Gtk::SHRINK | Gtk::FILL, 0, 0 );
 
   m_bgColor.set_text("Background Color");
@@ -2099,7 +2501,7 @@ ControlBox::ControlBox(GLScene *anArea, Gtk::Table *aTable) :
     sigc::mem_fun(*this, &ControlBox::on_background_clicked));
   eventBox->add(m_bgColor);
   eventBox->set_tooltip_text("Click to change background color");
-  m_table.attach(*eventBox, 0, 1, 2, 3, Gtk::FILL,
+  m_table.attach(*eventBox, 0, 1, 1, 2, Gtk::FILL,
                  Gtk::SHRINK | Gtk::FILL, 0, 0 );
   theBgColor.set_rgb(0, 0, 0);
 
@@ -2107,7 +2509,7 @@ ControlBox::ControlBox(GLScene *anArea, Gtk::Table *aTable) :
   m_sizeGroup->add_widget(m_timeLabel);
   m_timeBox.pack_start(m_timeLabel, Gtk::PACK_SHRINK);
   m_timeBox.pack_start(m_time, Gtk::PACK_SHRINK);
-  theSpeciesSize = m_area->getSpeciesSize();
+  theSpeciesSize = m_area_.getSpeciesSize();
   theButtonList = new Gtk::CheckButton*[theSpeciesSize]; 
   theLabelList = new Gtk::Label*[theSpeciesSize]; 
   for(unsigned int i(0); i!=theSpeciesSize; ++i)
@@ -2117,8 +2519,8 @@ ControlBox::ControlBox(GLScene *anArea, Gtk::Table *aTable) :
       Gtk::HBox* aHBox = Gtk::manage(new Gtk::HBox);
       Gtk::EventBox* m_EventBox=Gtk::manage(new Gtk::EventBox);
       m_EventBox->set_events(Gdk::BUTTON_RELEASE_MASK);
-      theLabelList[i]->set_text(m_area->getSpeciesName(i));
-      Color clr(m_area->getSpeciesColor(i));
+      theLabelList[i]->set_text(m_area_.getSpeciesName(i));
+      Color clr(m_area_.getSpeciesColor(i));
       Gdk::Color aColor;
       aColor.set_rgb(int(clr.r*65535), int(clr.g*65535), int(clr.b*65535));
       theLabelList[i]->modify_fg(Gtk::STATE_NORMAL, aColor);
@@ -2131,19 +2533,39 @@ ControlBox::ControlBox(GLScene *anArea, Gtk::Table *aTable) :
               sigc::mem_fun(*this, &ControlBox::on_checkbutton_clicked), i ) );
       m_EventBox->add(*theLabelList[i]);
       m_EventBox->set_tooltip_text("Right click to change species color");
-      theButtonList[i]->set_active(m_area->getSpeciesVisibility(i));
+      theButtonList[i]->set_active(m_area_.getSpeciesVisibility(i));
       aHBox->pack_start(*theButtonList[i], false, false, 2);
       aHBox->pack_start(*m_EventBox, false, false, 2);
-      m_table.attach(*aHBox, 0, 1, i+3, i+4, Gtk::FILL,
+      m_table.attach(*aHBox, 0, 1, i+2, i+3, Gtk::FILL,
                      Gtk::SHRINK | Gtk::FILL, 0, 0 );
     }
   std::cout << "theSpeciesSize:" << theSpeciesSize << std::endl;
 }
 
+void ControlBox::play_or_pause() {
+  if(m_area_.get_is_playing()) {
+    pause();
+  }
+  else {
+    play();
+  }
+}
+
+void ControlBox::play() {
+  m_area_.play();
+  play_button_.set_stock_id(Gtk::Stock::MEDIA_PAUSE);
+}
+
+void ControlBox::pause() {
+  m_area_.pause();
+  play_button_.set_stock_id(Gtk::Stock::MEDIA_PLAY);
+}
+
+
 void
 ControlBox::on_checkbutton_toggled(unsigned int id)
 {
-  m_area->setSpeciesVisibility(id, theButtonList[id]->get_active());
+  m_area_.setSpeciesVisibility(id, theButtonList[id]->get_active());
 }
 
 bool ControlBox::on_background_clicked(GdkEventButton* event)
@@ -2161,7 +2583,7 @@ bool ControlBox::on_background_clicked(GdkEventButton* event)
           clr.r = theBgColor.get_red()/65535.0;
           clr.g = theBgColor.get_green()/65535.0;
           clr.b = theBgColor.get_blue()/65535.0;
-          m_area->setBackgroundColor(clr);
+          m_area_.setBackgroundColor(clr);
           m_bgColor.modify_fg(Gtk::STATE_NORMAL, theBgColor);
           m_bgColor.modify_fg(Gtk::STATE_ACTIVE, theBgColor);
           m_bgColor.modify_fg(Gtk::STATE_PRELIGHT, theBgColor);
@@ -2181,7 +2603,7 @@ bool ControlBox::on_checkbutton_clicked(GdkEventButton* event, unsigned int id)
 {
   if(event->type == GDK_BUTTON_RELEASE && event->button == 3)
     {
-      Color clr(m_area->getSpeciesColor(id));
+      Color clr(m_area_.getSpeciesColor(id));
       Gdk::Color aColor;
       aColor.set_rgb(int(clr.r*65535), int(clr.g*65535), int(clr.b*65535));
       Gtk::ColorSelectionDialog dlg("Select a color"); 
@@ -2191,7 +2613,7 @@ bool ControlBox::on_checkbutton_clicked(GdkEventButton* event, unsigned int id)
         sigc::mem_fun(*this, &ControlBox::update_species_color), id, colorSel));
       if(dlg.run() == Gtk::RESPONSE_CANCEL)
         {
-          m_area->setSpeciesColor(id, clr);
+          m_area_.setSpeciesColor(id, clr);
           theLabelList[id]->modify_fg(Gtk::STATE_NORMAL, aColor);
           theLabelList[id]->modify_fg(Gtk::STATE_ACTIVE, aColor);
           theLabelList[id]->modify_fg(Gtk::STATE_PRELIGHT, aColor);
@@ -2225,7 +2647,7 @@ void ControlBox::update_species_color(unsigned int id,
   clr.r = aColor.get_red()/65535.0;
   clr.g = aColor.get_green()/65535.0;
   clr.b = aColor.get_blue()/65535.0;
-  m_area->setSpeciesColor(id, clr);
+  m_area_.setSpeciesColor(id, clr);
   theLabelList[id]->modify_fg(Gtk::STATE_NORMAL, aColor);
   theLabelList[id]->modify_fg(Gtk::STATE_ACTIVE, aColor);
   theLabelList[id]->modify_fg(Gtk::STATE_PRELIGHT, aColor);
@@ -2239,7 +2661,7 @@ void ControlBox::update_background_color(Gtk::ColorSelection* colorSel)
   clr.r = aColor.get_red()/65535.0;
   clr.g = aColor.get_green()/65535.0;
   clr.b = aColor.get_blue()/65535.0;
-  m_area->setBackgroundColor(clr);
+  m_area_.setBackgroundColor(clr);
   m_bgColor.modify_fg(Gtk::STATE_NORMAL, aColor);
   m_bgColor.modify_fg(Gtk::STATE_ACTIVE, aColor);
   m_bgColor.modify_fg(Gtk::STATE_PRELIGHT, aColor);
@@ -2248,42 +2670,52 @@ void ControlBox::update_background_color(Gtk::ColorSelection* colorSel)
 
 void ControlBox::on_3DMolecule_toggled()
 {
-  m_area->set3DMolecule(theCheck3DMolecule.get_active());
+  m_area_.set3DMolecule(theCheck3DMolecule.get_active());
 }
 
 void ControlBox::on_InvertBound_toggled()
 {
-  m_area->setInvertBound(theCheckInvertBound.get_active());
+  m_area_.setInvertBound(theCheckInvertBound.get_active());
 }
 
 void ControlBox::on_showTime_toggled()
 {
-  m_area->setShowTime(theCheckShowTime.get_active());
+  m_area_.setShowTime(theCheckShowTime.get_active());
 }
 
 void ControlBox::on_showSurface_toggled()
 {
-  m_area->setShowSurface(theCheckShowSurface.get_active());
+  m_area_.setShowSurface(theCheckShowSurface.get_active());
 }
 
 void ControlBox::on_resetTime_clicked()
 {
-  m_area->resetTime();
+  m_area_.resetTime();
 }
 
 void ControlBox::onResetRotation()
 {
-  m_area->resetView();
+  m_area_.resetView();
 }
 
 void ControlBox::onResetBound()
 {
-  m_area->resetBound();
+  unsigned int aLayerSize(m_area_.getLayerSize());
+  unsigned int aColSize(m_area_.getColSize());
+  unsigned int aRowSize(m_area_.getRowSize());
+  theXUpBoundAdj.set_value(0);
+  theYUpBoundAdj.set_value(aLayerSize);
+  theZUpBoundAdj.set_value(aRowSize);
+  theXLowBoundAdj.set_value(0);
+  theYLowBoundAdj.set_value(0);
+  theZLowBoundAdj.set_value(0);
+  theCheckInvertBound.set_active(false);
+  m_area_.resetBound();
 }
 
 void ControlBox::on_record_toggled()
 {
-  m_area->setRecord(theButtonRecord.get_active());
+  m_area_.setRecord(theRecordButton.get_active());
 }
 
 void ControlBox::setXangle(double angle)
@@ -2303,100 +2735,95 @@ void ControlBox::setZangle(double angle)
 
 void ControlBox::xRotateChanged()
 {
-  m_area->rotateMidAxisAbs(theXAdj.get_value(), 1, 0, 0);
+  m_area_.rotateMidAxisAbs(theXAdj.get_value(), 1, 0, 0);
 }
 
 void ControlBox::yRotateChanged()
 {
-  m_area->rotateMidAxisAbs(theYAdj.get_value(), 0, 1, 0);
+  m_area_.rotateMidAxisAbs(theYAdj.get_value(), 0, 1, 0);
 }
 
 void ControlBox::zRotateChanged()
 {
-  m_area->rotateMidAxisAbs(theZAdj.get_value(), 0, 0, 1);
+  m_area_.rotateMidAxisAbs(theZAdj.get_value(), 0, 0, 1);
 }
 
 void ControlBox::resizeScreen(unsigned aWidth, unsigned aHeight)
 {
-  if(theHeightAdj.get_upper() < aHeight || theWidthAdj.get_upper() < aWidth)
-    {
-      theHeightAdj.set_upper(aHeight);
-      theHeightAdj.set_value(aHeight);
-      theWidthAdj.set_upper(aWidth);
-      theWidthAdj.set_value(aWidth);
-      screenChanged();
-      theCheck3DMolecule.set_active();
-    }
-  /*
-  unsigned oldHeight(theHeightAdj.get_value());
-  unsigned oldWidth(theWidthAdj.get_value());
-  if(theHeightAdj.get_upper() < aHeight)
-    {
-      theHeightAdj.set_upper(aHeight);
-    }
-  //theHeightAdj.set_value(aHeight);
-  if(theWidthAdj.get_upper() < aWidth)
-    {
-      theWidthAdj.set_upper(aWidth);
-    }
-  //theWidthAdj.set_value(aWidth);
-  //*/
+  std::stringstream w, h;
+  w << aWidth;
+  h << aHeight;
+  m_width.set_text(w.str().c_str());
+  m_height.set_text(h.str().c_str());
 }
 
-void ControlBox::screenChanged()
+void ControlBox::step()
 {
-  m_areaTable->set_size_request((unsigned int)theWidthAdj.get_value(),
-                                (unsigned int)theHeightAdj.get_value());
-  m_area->setScreenHeight((unsigned int)theHeightAdj.get_value());
-  m_area->setScreenWidth((unsigned int)theWidthAdj.get_value());
+  play_button_.set_stock_id(Gtk::Stock::MEDIA_PLAY);
+  m_area_.step();
+}
+
+void ControlBox::progress_changed()
+{
+  if(m_area_.get_frame_cnt() != progress_adj_.get_value()) {
+    play_button_.set_stock_id(Gtk::Stock::MEDIA_PLAY);
+    m_area_.set_frame_cnt(progress_adj_.get_value());
+  }
 }
 
 void
 ControlBox::xUpBoundChanged()
 {
-  m_area->setXUpBound((unsigned int)theXUpBoundAdj.get_value());
+  m_area_.setXUpBound((unsigned int)theXUpBoundAdj.get_value());
 }
 
 void
 ControlBox::xLowBoundChanged()
 {
-  m_area->setXLowBound((unsigned int)theXLowBoundAdj.get_value());
+  m_area_.setXLowBound((unsigned int)theXLowBoundAdj.get_value());
 }
 
 void
 ControlBox::yUpBoundChanged()
 {
-  m_area->setYUpBound((unsigned int)theYUpBoundAdj.get_value());
+  m_area_.setYUpBound((unsigned int)theYUpBoundAdj.get_value());
 }
 
 void
 ControlBox::yLowBoundChanged()
 {
-  m_area->setYLowBound((unsigned int)theYLowBoundAdj.get_value());
+  m_area_.setYLowBound((unsigned int)theYLowBoundAdj.get_value());
 }
 
 void
 ControlBox::zUpBoundChanged()
 {
-  m_area->setZUpBound((unsigned int)theZUpBoundAdj.get_value());
+  m_area_.setZUpBound((unsigned int)theZUpBoundAdj.get_value());
 }
 
 void
 ControlBox::zLowBoundChanged()
 {
-  m_area->setZLowBound((unsigned int)theZLowBoundAdj.get_value());
+  m_area_.setZLowBound((unsigned int)theZLowBoundAdj.get_value());
 }
 
 void
-ControlBox::setStep(char* buffer)
+ControlBox::set_frame_cnt(int frame_cnt)
 {
-  m_steps.set_text(buffer);
+  if(frame_cnt > progress_adj_.get_upper()) {
+    progress_adj_.set_upper(frame_cnt);
+  }
+  if(frame_cnt != progress_adj_.get_value()) { 
+    progress_adj_.set_value(frame_cnt);
+  }
 }
 
 void
-ControlBox::setTime(char* buffer)
+ControlBox::setTime(double time)
 {
-  m_time.set_text(buffer);
+  std::stringstream s;
+  s << time;
+  m_time.set_text(s.str().c_str());
 }
 
 ControlBox::~ControlBox()
@@ -2406,101 +2833,28 @@ ControlBox::~ControlBox()
 
 Rulers::Rulers(const Glib::RefPtr<const Gdk::GL::Config>& config,
                const char* aFileName) :
-  m_area(config, aFileName),
+  m_area_(config, aFileName),
   m_hbox(),
-  m_table(3, 2, false),
-  m_control(&m_area, &m_table),
+  m_table(3, 1, false),
+  m_control_(m_area_, m_table),
   isRecord(false)
 {
-  m_area.setControlBox(&m_control);
+  m_area_.setControlBox(&m_control_);
   set_title("Spatiocyte Visualizer");
-  set_reallocate_redraws(true);
+  //set_reallocate_redraws(true);
   set_border_width(10);
 
   add(m_hbox);
   m_hbox.pack1(m_table, Gtk::PACK_EXPAND_WIDGET, 5);
-  m_hbox.pack2(m_control, Gtk::PACK_SHRINK, 5);
-  //m_area.set_size_request(XSIZE, YSIZE); 
-  m_table.attach(m_area, 1,2,1,2,  Gtk::FILL,
-                Gtk::FILL, 0, 0);
-  signal_expose_event().connect (sigc::mem_fun (*this, &Rulers::on_expose));
-  /*
-
-      if (event)
-    {
-        // clip to the area indicated by the expose event so that we only
-        // redraw the portion of the window that needs to be redrawn
-        cr->rectangle(event->area.x, event->area.y,
-                event->area.width, event->area.height);
-        cr->clip();
-    }
-    */
-  
-  /*
-  m_area.set_events(Gdk::POINTER_MOTION_MASK | Gdk::BUTTON_PRESS_MASK );
-
-  //Connect a signal handler for the DrawingArea's
-  //"motion_notify_event" signal, to detect cursor movement:
-  m_area.signal_motion_notify_event().connect( 
-         sigc::mem_fun(*this, &Rulers::on_area_motion_notify_event) );
-
-  // The horizontal ruler goes on top:
-  m_hrule.set_metric(Gtk::PIXELS);
-  m_hrule.set_range(0, XSIZE, 10, XSIZE );
-  //C example uses 7, 13, 0, 20 - don't know why.
-
-  m_table.attach(m_hrule, 1,2,0,1,
-		 Gtk::EXPAND | Gtk::SHRINK | Gtk::FILL, Gtk::FILL,
-		 0, 0);
-
-  // Vertical ruler:
-  m_vrule.set_metric(Gtk::PIXELS);
-  m_vrule.set_range(0, YSIZE, 10, YSIZE );
-
-  m_table.attach(m_vrule, 0, 1, 1, 2,
-		 Gtk::FILL, Gtk::EXPAND | Gtk::SHRINK | Gtk::FILL, 0, 0 );
-     */
-
+  m_hbox.pack2(m_control_, Gtk::PACK_SHRINK, 5);
+  m_table.attach(m_area_, 0,1,0,1,
+		 Gtk::EXPAND | Gtk::FILL , Gtk::EXPAND | Gtk::FILL, 0, 0);
   show_all_children();
 }
-bool Rulers::on_expose(GdkEventExpose* event)
-{
-  unsigned width(m_table.get_allocation().get_width());
-  unsigned height(m_table.get_allocation().get_height());
-  m_control.resizeScreen(width, height);
-  /*
-  //m_area.set_size_request(0,0);
-  unsigned width(m_table.get_allocation().get_width());
-  unsigned height(m_table.get_allocation().get_height());
-  if(width != m_area.get_allocation().get_width())
-    {
-      m_control.resizeScreen(width, height);
-    }
-    */
-  return false;
-}
 
-/*
-bool Rulers::on_configure_event(GdkEventConfigure* event)
-{
-  std::cout << "configureii" << std::endl;
-  return true;
-}
-*/
-
-
-bool Rulers::on_area_motion_notify_event(GdkEventMotion* event)
-{
-  //The cursor was moved in the m_area widget.
-  //Show the position in the rulers:
-
-  if(event)
-  {
-    m_hrule.property_position().set_value(event->x);
-    m_vrule.property_position().set_value(event->y);
-  }
-
-  return false;  //false = signal not fully handled, pass it on..
+void GLScene::on_size_allocate(Gtk::Allocation& allocation) {
+  m_control_->resizeScreen(allocation.get_width(), allocation.get_height());
+  Gtk::GL::DrawingArea::on_size_allocate(allocation);
 }
 
 bool Rulers::on_key_press_event(GdkEventKey* event)
@@ -2508,163 +2862,175 @@ bool Rulers::on_key_press_event(GdkEventKey* event)
   switch (event->keyval)
     {
     case GDK_x:
-      m_area.rotate(1,1,0,0);
+      m_area_.rotate(1,1,0,0);
       break;
     case GDK_X:
-      m_area.rotate(-1,1,0,0);
+      m_area_.rotate(-1,1,0,0);
       break;
     case GDK_y:
-      m_area.rotate(1,0,1,0);
+      m_area_.rotate(1,0,1,0);
       break;
     case GDK_Y:
-      m_area.rotate(-1,0,1,0);
+      m_area_.rotate(-1,0,1,0);
       break;
     case GDK_Home:
-      m_area.resetView();
+      m_area_.resetView();
       break;
     case GDK_Pause:
-      m_area.pause();
+      m_control_.pause();
       break;
     case GDK_p:
-      m_area.pause();
+      m_control_.pause();
       break;
     case GDK_P:
-      m_area.pause();
+      m_control_.pause();
       break;
     case GDK_Return:
       if(event->state&Gdk::SHIFT_MASK)
         {
-          m_area.setReverse(true);
-          m_area.step();
+          m_area_.set_is_forward(false);
+          m_control_.step();
         }
       else
         {
-          m_area.setReverse(false);
-          m_area.step();
+          m_area_.set_is_forward(true);
+          m_control_.step();
         }
       break;
     case GDK_space:
-      m_area.pause();
+      m_control_.play_or_pause();
+      break;
+    case GDK_F:
+      m_area_.translate(0,0,-1);
+      break;
+    case GDK_f:
+      m_area_.zoomIn();
+      break;
+    case GDK_B:
+      m_area_.translate(0,0,1);
+      break;
+    case GDK_b:
+      m_area_.zoomOut();
       break;
     case GDK_Page_Up:
       if(event->state&Gdk::SHIFT_MASK)
         {
-          m_area.translate(0,0,-1);
+          m_area_.translate(0,0,-1);
         }
       else
         {
-          m_area.zoomIn();
+          m_area_.zoomIn();
         }
       break;
     case GDK_Page_Down:
       if(event->state&Gdk::SHIFT_MASK)
         {
-          m_area.translate(0,0,1);
+          m_area_.translate(0,0,1);
         }
       else
         {
-          m_area.zoomOut();
+          m_area_.zoomOut();
         }
       break;
     case GDK_0:
       if(event->state&Gdk::CONTROL_MASK)
         {
-          m_area.resetView();
+          m_area_.resetView();
         }
       break;
     case GDK_equal:
       if(event->state&Gdk::CONTROL_MASK)
         {
-          m_area.zoomIn();
+          m_area_.zoomIn();
         }
       break;
     case GDK_plus:
       if(event->state&Gdk::CONTROL_MASK)
         {
-          m_area.zoomIn();
+          m_area_.zoomIn();
         }
       break;
     case GDK_minus:
       if(event->state&Gdk::CONTROL_MASK)
         {
-          m_area.zoomOut();
+          m_area_.zoomOut();
         }
       break;
     case GDK_Down:
       if(event->state&Gdk::SHIFT_MASK)
         {
-          m_area.translate(0,-1,0);
+          m_area_.translate(0,-1,0);
         }
       else if (event->state&Gdk::CONTROL_MASK)
         {
-          m_area.rotateMidAxis(1,1,0,0);
+          m_area_.rotateMidAxis(1,1,0,0);
         }
       else
         {
-          m_area.setReverse(true);
-          m_area.step();
+          m_area_.set_is_forward(false);
+          m_control_.step();
         }
       break;
     case GDK_Up:
       if(event->state&Gdk::SHIFT_MASK)
         {
-          m_area.translate(0,1,0);
+          m_area_.translate(0,1,0);
         }
       else if (event->state&Gdk::CONTROL_MASK)
         {
-          m_area.rotateMidAxis(-1,1,0,0);
+          m_area_.rotateMidAxis(-1,1,0,0);
         }
       else
         {
-          m_area.setReverse(false);
-          m_area.step();
+          m_area_.set_is_forward(true);
+          m_control_.step();
         }
       break;
     case GDK_Right:
       if(event->state&Gdk::SHIFT_MASK)
         {
-          m_area.translate(1,0,0);
+          m_area_.translate(1,0,0);
         }
       else if (event->state&Gdk::CONTROL_MASK)
         {
-          m_area.rotateMidAxis(1,0,1,0);
+          m_area_.rotateMidAxis(1,0,1,0);
         }
       else
         {
-          m_area.setReverse(false);
-          m_area.play();
+          m_area_.set_is_forward(true);
+          m_control_.play();
         }
       break;
     case GDK_Left:
       if(event->state&Gdk::SHIFT_MASK)
         {
-          m_area.translate(-1,0,0);
+          m_area_.translate(-1,0,0);
         }
       else if (event->state&Gdk::CONTROL_MASK)
         {
-          m_area.rotateMidAxis(-1,0,1,0);
+          m_area_.rotateMidAxis(-1,0,1,0);
         }
       else
         {
-          m_area.setReverse(true);
-          m_area.play();
+          m_area_.set_is_forward(false);
+          m_control_.play();
         }
       break;
     case GDK_z:
-      m_area.rotateMidAxis(-1,0,0,1);
+      m_area_.rotateMidAxis(-1,0,0,1);
       break;
     case GDK_Z:
-      m_area.rotateMidAxis(1,0,0,1);
+      m_area_.rotateMidAxis(1,0,0,1);
       break;
     case GDK_l:
-      m_area.rotate(1,0,0,1);
+      m_area_.rotate(1,0,0,1);
       break;
     case GDK_r:
-      m_area.rotate(-1,0,0,1);
+      m_area_.rotate(-1,0,0,1);
       break;
     case GDK_s:
       std::cout << "saving frame" << std::endl;
-      m_area.writePng();
+      m_area_.writePng();
       break;
     case GDK_S:
       if(!isRecord)
@@ -2677,7 +3043,7 @@ bool Rulers::on_key_press_event(GdkEventKey* event)
           isRecord = false;
           std::cout << "Stopped saving frames" << std::endl; 
         }
-      m_area.setRecord(isRecord);
+      m_area_.setRecord(isRecord);
       break;
     default:
       return true;
@@ -2776,7 +3142,3 @@ int main(int argc, char** argv)
   Gtk::Main::run(aRuler);
   return 0;
 }
-
-
-
-

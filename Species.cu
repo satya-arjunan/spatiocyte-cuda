@@ -56,6 +56,9 @@ Species::Species(const std::string name, const unsigned nmols, const double D,
 }
 
 void Species::initialize() {
+  if(!is_structure_species_) {
+    populate();
+  }
   if(mols_.size() < 80000) {
     mols_.reserve(10000);
   }

@@ -58,6 +58,7 @@ void Diffuser::initialize() {
   reactions_.resize(model.get_species().size(), NULL);
   substrate_mols_.resize(model.get_species().size(), NULL);
   product_mols_.resize(model.get_species().size(), NULL);
+  reacteds_.resize(mols_.size()+1, 0);
  
   std::vector<Reaction*>& reactions(species_.get_reactions());
   for(unsigned i(0); i != reactions.size(); ++i) {
@@ -87,6 +88,7 @@ double Diffuser::get_D() const {
 
 struct generate {
   __host__ __device__ generate(
+      const unsigned mol_size,
       const unsigned seed,
       const voxel_t stride,
       const voxel_t id_stride,
@@ -95,6 +97,7 @@ struct generate {
       const mol_t* offsets,
       umol_t* reacteds,
       voxel_t* voxels):
+    mol_size_(mol_size),
     seed_(seed),
     stride_(stride),
     id_stride_(id_stride),
@@ -115,20 +118,18 @@ struct generate {
     //If not occupied, walk:
     if(res == vac_id_) {
       voxels_[vdx] = vac_id_;
-      reacteds_[index] = 0;
       return val;
     }
     //If occupied, check and add reacted:
     const voxel_t tar_id(res/stride_);
     if(is_reactive_[tar_id]) {
+      const unsigned old(atomicAdd(reacteds_+mol_size_, 1));
       reacteds_[index] = res;
-    }
-    else {
-      reacteds_[index] = 0;
     }
     //Stay at original position:
     return vdx;
   }
+  const unsigned mol_size_;
   const unsigned seed_;
   const voxel_t stride_;
   const voxel_t id_stride_;
@@ -146,20 +147,30 @@ struct is_reacted {
 };
 
 struct react {
-  __device__ umol_t operator()(const umol_t mol, const umol_t reacted) const {
+  __host__ __device__ react(
+      const unsigned mol_size,
+      umol_t* reacteds):
+    mol_size_(mol_size),
+    reacteds_(reacteds) {}
+  __device__ umol_t operator()(const unsigned index, const umol_t mol) const {
+      const unsigned old(atomicSub(reacteds_+mol_size_, 1));
+    reacteds_[index] = 0;
     return mol;
   }
+  const unsigned mol_size_;
+  umol_t* reacteds_;
 };
 
 void Diffuser::walk() {
   const size_t size(mols_.size());
-  reacteds_.resize(size);
+  reacteds_.resize(size+1);
   thrust::transform(thrust::device, 
       thrust::counting_iterator<unsigned>(0),
       thrust::counting_iterator<unsigned>(size),
       mols_.begin(),
       mols_.begin(),
       generate(
+        size,
         seed_,
         stride_,
         id_stride_,
@@ -169,12 +180,14 @@ void Diffuser::walk() {
         thrust::raw_pointer_cast(&reacteds_[0]),
         thrust::raw_pointer_cast(&voxels_[0])));
   thrust::transform_if(thrust::device,
+      thrust::counting_iterator<unsigned>(0),
+      thrust::counting_iterator<unsigned>(size),
       mols_.begin(),
-      mols_.end(),
-      reacteds_.begin(),
       reacteds_.begin(),
       mols_.begin(),
-      react(),
+      react(
+        size,
+        thrust::raw_pointer_cast(&reacteds_[0])),
       is_reacted());
   seed_ += size;
 }

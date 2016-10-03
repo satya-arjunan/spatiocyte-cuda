@@ -61,14 +61,18 @@ class GLScene;
 class ControlBox : public Gtk::ScrolledWindow
 {
 public:
-  ControlBox(GLScene*, Gtk::Table*);
+  ControlBox(GLScene&, Gtk::Table&);
   virtual ~ControlBox();
   void resizeScreen(unsigned, unsigned);
-  void setStep(char* buffer);
-  void setTime(char* buffer);
+  void set_frame_cnt(int);
+  void setTime(double);
   void setXangle(double);
   void setYangle(double);
   void setZangle(double);
+  void play();
+  void pause();
+  void step();
+  void play_or_pause();
 protected:
   bool isChanging;
   bool on_background_clicked(GdkEventButton*);
@@ -83,7 +87,6 @@ protected:
   void on_resetTime_clicked();
   void on_showSurface_toggled();
   void on_showTime_toggled();
-  void screenChanged();
   void update_background_color(Gtk::ColorSelection*);
   void update_species_color(unsigned int, Gtk::ColorSelection*);
   void xLowBoundChanged();
@@ -95,18 +98,18 @@ protected:
   void zLowBoundChanged();
   void zRotateChanged();
   void zUpBoundChanged();
+  void progress_changed();
+  void progress_adjust();
 protected:
-  GLScene* m_area;
+  GLScene& m_area_;
   Gtk::CheckButton** theButtonList;
   Gtk::Label** theLabelList;
   Gtk::Table m_table;
-  Gtk::Table* m_areaTable;
+  Gtk::Table& m_area_table_;
 private:
   Gdk::Color theBgColor;
   Glib::RefPtr<Gtk::SizeGroup> m_sizeGroup;
   Gtk::Adjustment theDepthAdj;
-  Gtk::Adjustment theHeightAdj;
-  Gtk::Adjustment theWidthAdj;
   Gtk::Adjustment theXAdj;
   Gtk::Adjustment theXLowBoundAdj;
   Gtk::Adjustment theXUpBoundAdj;
@@ -116,23 +119,23 @@ private:
   Gtk::Adjustment theZAdj;
   Gtk::Adjustment theZLowBoundAdj;
   Gtk::Adjustment theZUpBoundAdj;
-  Gtk::Button theButtonResetTime;
+  Gtk::Button theResetTimeButton;
   Gtk::Button theResetBoundButton;
   Gtk::Button theResetDepthButton;
   Gtk::Button theResetRotButton;
   Gtk::CheckButton theCheck3DMolecule;
-  Gtk::CheckButton theCheckFix;
   Gtk::CheckButton theCheckInvertBound;
   Gtk::CheckButton theCheckShowSurface;
   Gtk::CheckButton theCheckShowTime;
-  Gtk::Entry m_steps;
+  Gtk::Entry frame_cnt_;
   Gtk::Entry m_time;
+  Gtk::Entry m_width;
+  Gtk::Entry m_height;
   Gtk::Frame theFrameBoundAdj;
   Gtk::Frame theFrameLatticeAdj;
   Gtk::Frame theFrameRotAdj;
   Gtk::Frame theFrameScreen;
   Gtk::HBox m_rightBox;
-  Gtk::HBox m_stepBox;
   Gtk::HBox m_timeBox;
   Gtk::HBox the3DMoleculeBox;
   Gtk::HBox theBoxBoundFixReset;
@@ -150,8 +153,6 @@ private:
   Gtk::HBox theZLowBoundBox;
   Gtk::HBox theZUpBoundBox;
   Gtk::HScale theDepthScale;
-  Gtk::HScale theHeightScale;
-  Gtk::HScale theWidthScale;
   Gtk::HScale theXLowBoundScale;
   Gtk::HScale theXScale;
   Gtk::HScale theXUpBoundScale;
@@ -162,7 +163,7 @@ private:
   Gtk::HScale theZScale;
   Gtk::HScale theZUpBoundScale;
   Gtk::Label m_bgColor;
-  Gtk::Label m_stepLabel;
+  Gtk::Label frame_cnt_label_;
   Gtk::Label m_timeLabel;
   Gtk::Label theDepthLabel;
   Gtk::Label theHeightLabel;
@@ -177,8 +178,6 @@ private:
   Gtk::Label theZLowBoundLabel;
   Gtk::Label theZUpBoundLabel;
   Gtk::SpinButton theDepthSpin;
-  Gtk::SpinButton theHeightSpin;
-  Gtk::SpinButton theWidthSpin;
   Gtk::SpinButton theXLowBoundSpin;
   Gtk::SpinButton theXSpin;
   Gtk::SpinButton theXUpBoundSpin;
@@ -191,12 +190,17 @@ private:
   Gtk::ToggleButton m_3d;
   Gtk::ToggleButton m_showSurface;
   Gtk::ToggleButton m_showTime;
-  Gtk::ToggleButton theButtonRecord;
+  Gtk::ToggleButton theRecordButton;
   Gtk::VBox theBoxCtrl;
   Gtk::VBox theBoxInBound;
   Gtk::VBox theBoxInFrame;
   Gtk::VBox theBoxInLattice;
   Gtk::VBox theBoxInScreen;
+  Gtk::ToolButton play_button_;
+  Gtk::HBox progress_box_;
+  Gtk::Adjustment progress_adj_;
+  Gtk::SpinButton progress_spin_;
+  Gtk::HScale progress_bar_;
 };
 
 class GLScene : public Gtk::GL::DrawingArea
@@ -231,9 +235,7 @@ public:
   void setBackgroundColor(Color);
   void setControlBox(ControlBox* aControl);
   void setRecord(bool isRecord);
-  void setReverse(bool isReverse);
-  void setScreenHeight( unsigned int );
-  void setScreenWidth( unsigned int );
+  void set_is_forward(bool is_forward);
   void setShowSurface(bool);
   void setShowTime(bool);
   void setSpeciesColor(unsigned int id, Color);
@@ -249,7 +251,17 @@ public:
   void update() { get_window()->process_updates(false); }
   void zoomIn();
   void zoomOut();
-protected:
+  void set_frame_cnt(int);
+  unsigned get_frame_size();
+  int get_frame_cnt();
+  bool get_is_playing();
+protected: 
+  void project();
+  void set_position(double x, double y, double& px, double& py, double& pz); 
+  bool get_is_event_masked(GdkEventButton* event, int mask);
+  bool get_is_button(GdkEventButton* event, int button, int mask);
+  void init_frames();
+  void inc_dec_frame_cnt();
   bool (GLScene::*theLoadCoordsFunction)(std::streampos&);
   bool loadCoords(std::streampos&);
   bool loadMeanCoords(std::streampos&);
@@ -260,6 +272,12 @@ protected:
   virtual bool on_unmap_event(GdkEventAny* event);
   virtual bool on_visibility_notify_event(GdkEventVisibility* event);
   virtual void on_realize();
+  virtual void on_size_allocate(Gtk::Allocation& allocation);
+  virtual bool on_button_press_event(GdkEventButton* button_event);
+  virtual bool on_button_release_event(GdkEventButton* release_event);
+  virtual bool on_scroll_event(GdkEventScroll* scroll_event);
+  virtual bool on_motion_notify_event(GdkEventMotion* motion_event);
+  virtual bool on_key_press_event(GdkEventKey* key_event);
   void (GLScene::*thePlot3DFunction)();
   void (GLScene::*thePlotFunction)();
   void drawBox(GLfloat xlo, GLfloat xhi, GLfloat ylo, GLfloat yhi, GLfloat zlo,
@@ -280,15 +298,13 @@ protected:
   void setTranslucentColor(unsigned int i, GLfloat j);
   void timeout_add();
   void timeout_remove();
+  void configure();
 protected:
   Color* theSpeciesColor;
-  ControlBox* m_control;
+  ControlBox* m_control_;
   GLfloat Aspect;
   GLfloat FieldOfView;
   GLfloat Near;
-  GLfloat ViewMidx;
-  GLfloat ViewMidy;
-  GLfloat ViewMidz;
   GLfloat ViewSize;
   GLfloat X;
   GLfloat Xtrans;
@@ -299,9 +315,9 @@ protected:
   GLfloat prevY;
   GLfloat prevZ;
   GLfloat theBCCc;
-  GLfloat _hcpX;
-  GLfloat _hcpO;
-  GLfloat _hcpZ;
+  GLfloat hcpO_;
+  GLfloat hcpX_;
+  GLfloat hcpZ_;
   GLfloat theRotateAngle;
   GLuint m_FontListBase;
   Glib::RefPtr<Pango::Context> ft2_context;
@@ -311,28 +327,42 @@ protected:
   Point** thePoints;
   bool *theSpeciesVisibility;
   bool isChanged;
+  bool isShownSurface;
   bool isInvertBound;
-  bool m_Run;
-  bool m_RunReverse;
+  bool is_playing_;
+  bool is_forward_;
   bool show3DMolecule;
   bool showSurface;
   bool showTime;
   bool startRecord;
+  bool is_mouse_rotate_;
+  bool is_mouse_zoom_;
+  bool is_mouse_pan_;
+  bool is_mouse_rotated_;
   char** theSpeciesNameList;
   double *theRadii;
   double theCurrentTime;
   double theRadius;
-  double theRealColSize;
-  double theRealLayerSize;
-  double theRealRowSize;
   double theResetTime;
   double theVoxelRadius;
   double xAngle;
   double yAngle;
   double zAngle;
+  double mouse_drag_pos_x_;
+  double mouse_drag_pos_y_;
+  double mouse_drag_pos_z_;
+  double mouse_x_;
+  double mouse_y_;
+  double z_near_;
+  double z_far_;
+  double top_;
+  double bottom_;
+  double left_;
+  double right_;
+  const double init_zoom_;
   int m_FontHeight;
   int m_FontWidth;
-  int m_stepCnt;
+  int frame_cnt_;
   int theGLIndex;
   sigc::connection m_ConnectionTimeout;
   std::ifstream theFile;
@@ -342,7 +372,7 @@ protected:
   std::size_t pixel_extent_width;
   std::size_t tex_height;
   std::size_t tex_width;
-  std::vector<std::streampos> theStreamPosList;
+  std::vector<std::streampos> frames_;
   std::vector<unsigned int> thePolySpeciesList;
   unsigned int theColSize;
   unsigned int theCutCol;
@@ -380,6 +410,10 @@ protected:
   unsigned int* theZUpBound;
   unsigned int** theCoords;
   unsigned int** theFrequency;
+  Point min_point_;
+  Point max_point_;
+  Point mid_point_;
+  Point dimensions_;
 };
 
 class Rulers : public Gtk::Window
@@ -390,17 +424,15 @@ public:
 protected:
   //signal handlers:
   //Gtk::DrawingArea m_area;
-  GLScene m_area;
+  virtual bool on_key_press_event(GdkEventKey* event);
+  GLScene m_area_;
   Gtk::HPaned m_hbox;
   Gtk::HRuler m_hrule;
   Gtk::Table m_table;
   Gtk::VRuler m_vrule;
-  ControlBox m_control;
+  ControlBox m_control_;
   bool isRecord;
   static const int XSIZE = 250, YSIZE = 250;
-  virtual bool on_area_motion_notify_event(GdkEventMotion* event); //override
-  virtual bool on_expose(GdkEventExpose* event);
-  virtual bool on_key_press_event(GdkEventKey* event);
 };
 
 #endif /* __Visualizer_hpp */

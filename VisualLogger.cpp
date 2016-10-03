@@ -79,12 +79,13 @@ void VisualLogger::initialize_log()
   logfile_.write((char*)(&dimensions.z), sizeof(dimensions.z));
   logfile_.write((char*)(&dimensions.y), sizeof(dimensions.y));
   const double voxel_radius(VOXEL_RADIUS);
-  const Vector<double> real_dimensions(compartment_.get_dimensions()/
-      (voxel_radius*2));
-  std::cout << "dim:" << real_dimensions.x << " " << real_dimensions.y << " " << real_dimensions.z << std::endl;
-  logfile_.write((char*)(&real_dimensions.x), sizeof(real_dimensions.x));
-  logfile_.write((char*)(&real_dimensions.z), sizeof(real_dimensions.z));
-  logfile_.write((char*)(&real_dimensions.y), sizeof(real_dimensions.y));
+  const Vector<double> min_point(0,0,0);
+  logfile_.write((char*)(&min_point), sizeof(min_point));
+  const Vector<double> max_point(compartment_.get_dimensions()/
+                                 (voxel_radius*2));
+  std::cout << "dim:" << max_point.x << " " << max_point.y << " " <<
+    max_point.z << std::endl;
+  logfile_.write((char*)(&max_point), sizeof(max_point));
   const umol_t latticeSpSize(species_.size());
   logfile_.write((char*)(&latticeSpSize), sizeof(latticeSpSize));
   const umol_t polymerSize(0);
