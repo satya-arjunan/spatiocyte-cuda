@@ -2704,8 +2704,8 @@ void ControlBox::onResetBound()
   unsigned int aColSize(m_area_.getColSize());
   unsigned int aRowSize(m_area_.getRowSize());
   theXUpBoundAdj.set_value(0);
-  theYUpBoundAdj.set_value(aLayerSize);
-  theZUpBoundAdj.set_value(aRowSize);
+  theYUpBoundAdj.set_value(aRowSize);
+  theZUpBoundAdj.set_value(aLayerSize);
   theXLowBoundAdj.set_value(0);
   theYLowBoundAdj.set_value(0);
   theZLowBoundAdj.set_value(0);
