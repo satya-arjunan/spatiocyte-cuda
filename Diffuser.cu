@@ -31,6 +31,7 @@
 #include <time.h>
 #include <thrust/execution_policy.h>
 #include <thrust/random.h>
+#include <thrust/system/cuda/detail/bulk/bulk.hpp>
 #include <curand_kernel.h>
 #include <Diffuser.hpp>
 #include <Compartment.hpp>
@@ -114,17 +115,218 @@ struct generate {
     const bool odd_lay((vdx/NUM_COLROW)&1);
     const bool odd_col((vdx%NUM_COLROW/NUM_ROW)&1);
     mol2_t val(mol2_t(vdx)+offsets_[rand+(24&(-odd_lay))+(12&(-odd_col))]);
-    const voxel_t res(atomicCAS(voxels_+val, vac_id_, index+id_stride_));
-    //If not occupied, walk:
-    if(res == vac_id_) {
+    //Atomically put the current molecule id, index+id_stride_ at the target
+    //voxel if it is vacant: 
+    const voxel_t tar_mol_id(atomicCAS(voxels_+val, vac_id_, index+id_stride_));
+    //If not occupied, finalize walk:
+    if(tar_mol_id == vac_id_) {
       voxels_[vdx] = vac_id_;
       return val;
     }
-    //If occupied, check and add reacted:
-    const voxel_t tar_id(res/stride_);
+    //it is occupied, so check if it is reactive and add reacted:
+    const voxel_t tar_id(tar_mol_id/stride_);
     if(is_reactive_[tar_id]) {
-      const unsigned old(atomicAdd(reacteds_+mol_size_, 1));
-      reacteds_[index] = res;
+      //const unsigned old(atomicAdd(reacteds_+mol_size_, 1));
+      reacteds_[index] = tar_mol_id;
+    }
+    //Stay at original position:
+    return vdx;
+  }
+  const unsigned mol_size_;
+  const unsigned seed_;
+  const voxel_t stride_;
+  const voxel_t id_stride_;
+  const voxel_t vac_id_;
+  const bool* is_reactive_;
+  const mol_t* offsets_;
+  umol_t* reacteds_;
+  voxel_t* voxels_;
+};
+
+struct is_reacted {
+  __device__ bool operator()(const umol_t reacted) {
+    return reacted;
+  }
+};
+
+struct react {
+  __host__ __device__ react(
+      const unsigned mol_size,
+      umol_t* reacteds):
+    mol_size_(mol_size),
+    reacteds_(reacteds) {}
+  __device__ umol_t operator()(const unsigned index, const umol_t mol) const {
+      const unsigned old(atomicSub(reacteds_+mol_size_, 1));
+    reacteds_[index] = 0;
+    return mol;
+  }
+  const unsigned mol_size_;
+  umol_t* reacteds_;
+};
+
+void Diffuser::walk() {
+  const size_t size(mols_.size());
+  reacteds_.resize(size+1);
+  thrust::transform(thrust::device, 
+      thrust::counting_iterator<unsigned>(0),
+      thrust::counting_iterator<unsigned>(size),
+      mols_.begin(),
+      mols_.begin(),
+      generate(
+        size,
+        seed_,
+        stride_,
+        id_stride_,
+        vac_id_,
+        thrust::raw_pointer_cast(&is_reactive_[0]),
+        thrust::raw_pointer_cast(&offsets_[0]),
+        thrust::raw_pointer_cast(&reacteds_[0]),
+        thrust::raw_pointer_cast(&voxels_[0])));
+  seed_ += size;
+}
+
+/* Verified random walk without reaction: 42.0 s
+struct generate {
+  __host__ __device__ generate(
+      const unsigned mol_size,
+      const unsigned seed,
+      const voxel_t stride,
+      const voxel_t id_stride,
+      const voxel_t vac_id,
+      const bool* is_reactive,
+      const mol_t* offsets,
+      umol_t* reacteds,
+      voxel_t* voxels):
+    mol_size_(mol_size),
+    seed_(seed),
+    stride_(stride),
+    id_stride_(id_stride),
+    vac_id_(vac_id),
+    is_reactive_(is_reactive),
+    offsets_(offsets),
+    reacteds_(reacteds),
+    voxels_(voxels) {} 
+  __device__ umol_t operator()(const unsigned index, const umol_t vdx) const {
+    thrust::default_random_engine rng;
+    rng.discard(seed_+index);
+    thrust::uniform_int_distribution<unsigned> u(0, 11);
+    const unsigned rand(u(rng));
+    const bool odd_lay((vdx/NUM_COLROW)&1);
+    const bool odd_col((vdx%NUM_COLROW/NUM_ROW)&1);
+    mol2_t val(mol2_t(vdx)+offsets_[rand+(24&(-odd_lay))+(12&(-odd_col))]);
+    //Atomically put the current molecule id, index+id_stride_ at the target
+    //voxel if it is vacant: 
+    const voxel_t tar_mol_id(atomicCAS(voxels_+val, vac_id_, index+id_stride_));
+    //If not occupied, finalize walk:
+    if(tar_mol_id == vac_id_) {
+      voxels_[vdx] = vac_id_;
+      return val;
+    }
+    //it is occupied, so check if it is reactive and add reacted:
+    const voxel_t tar_id(tar_mol_id/stride_);
+    if(is_reactive_[tar_id]) {
+      //const unsigned old(atomicAdd(reacteds_+mol_size_, 1));
+      reacteds_[index] = tar_mol_id;
+    }
+    //Stay at original position:
+    return vdx;
+  }
+  const unsigned mol_size_;
+  const unsigned seed_;
+  const voxel_t stride_;
+  const voxel_t id_stride_;
+  const voxel_t vac_id_;
+  const bool* is_reactive_;
+  const mol_t* offsets_;
+  umol_t* reacteds_;
+  voxel_t* voxels_;
+};
+
+struct is_reacted {
+  __device__ bool operator()(const umol_t reacted) {
+    return reacted;
+  }
+};
+
+struct react {
+  __host__ __device__ react(
+      const unsigned mol_size,
+      umol_t* reacteds):
+    mol_size_(mol_size),
+    reacteds_(reacteds) {}
+  __device__ umol_t operator()(const unsigned index, const umol_t mol) const {
+      const unsigned old(atomicSub(reacteds_+mol_size_, 1));
+    reacteds_[index] = 0;
+    return mol;
+  }
+  const unsigned mol_size_;
+  umol_t* reacteds_;
+};
+
+void Diffuser::walk() {
+  const size_t size(mols_.size());
+  reacteds_.resize(size+1);
+  thrust::transform(thrust::device, 
+      thrust::counting_iterator<unsigned>(0),
+      thrust::counting_iterator<unsigned>(size),
+      mols_.begin(),
+      mols_.begin(),
+      generate(
+        size,
+        seed_,
+        stride_,
+        id_stride_,
+        vac_id_,
+        thrust::raw_pointer_cast(&is_reactive_[0]),
+        thrust::raw_pointer_cast(&offsets_[0]),
+        thrust::raw_pointer_cast(&reacteds_[0]),
+        thrust::raw_pointer_cast(&voxels_[0])));
+  seed_ += size;
+}
+*/
+
+/*
+struct generate {
+  __host__ __device__ generate(
+      const unsigned mol_size,
+      const unsigned seed,
+      const voxel_t stride,
+      const voxel_t id_stride,
+      const voxel_t vac_id,
+      const bool* is_reactive,
+      const mol_t* offsets,
+      umol_t* reacteds,
+      voxel_t* voxels):
+    mol_size_(mol_size),
+    seed_(seed),
+    stride_(stride),
+    id_stride_(id_stride),
+    vac_id_(vac_id),
+    is_reactive_(is_reactive),
+    offsets_(offsets),
+    reacteds_(reacteds),
+    voxels_(voxels) {} 
+  __device__ umol_t operator()(const unsigned index, const umol_t vdx) const {
+    thrust::default_random_engine rng;
+    rng.discard(seed_+index);
+    thrust::uniform_int_distribution<unsigned> u(0, 11);
+    const unsigned rand(u(rng));
+    const bool odd_lay((vdx/NUM_COLROW)&1);
+    const bool odd_col((vdx%NUM_COLROW/NUM_ROW)&1);
+    mol2_t val(mol2_t(vdx)+offsets_[rand+(24&(-odd_lay))+(12&(-odd_col))]);
+    //Atomically put the current molecule id, index+id_stride_ at the target
+    //voxel if it is vacant: 
+    const voxel_t tar_mol_id(atomicCAS(voxels_+val, vac_id_, index+id_stride_));
+    //If not occupied, finalize walk:
+    if(tar_mol_id == vac_id_) {
+      voxels_[vdx] = vac_id_;
+      return val;
+    }
+    //it is occupied, so check if it is reactive and add reacted:
+    const voxel_t tar_id(tar_mol_id/stride_);
+    if(is_reactive_[tar_id]) {
+      //const unsigned old(atomicAdd(reacteds_+mol_size_, 1));
+      reacteds_[index] = tar_mol_id;
     }
     //Stay at original position:
     return vdx;
@@ -191,6 +393,7 @@ void Diffuser::walk() {
       is_reacted());
   seed_ += size;
 }
+*/
 
 /* Verified random walk with thrust::random : 44.1 s
 struct generate {

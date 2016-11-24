@@ -37,9 +37,9 @@
 
 int main() {
   Model model;
-  Species A("A", 8000, 1e-12, model, model.get_compartment(),
+  Species A("A", 800000, 1e-12, model, model.get_compartment(),
             model.get_compartment().get_volume_species());
-  Species B("B", 8000, 1e-12, model, model.get_compartment(),
+  Species B("B", 800000, 1e-12, model, model.get_compartment(),
             model.get_compartment().get_volume_species());
   Species C("C", 0, 1e-12, model, model.get_compartment(),
             model.get_compartment().get_volume_species());
