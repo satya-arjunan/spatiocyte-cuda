@@ -74,6 +74,12 @@ void Diffuser::initialize() {
       } 
     } 
   } 
+  cudaDeviceProp prop;
+  cudaGetDeviceProperties(&prop, 0);
+  //better performance when the number of blocks is twice the number of 
+  //multi processors (aka streams):
+  blocks_ = prop.multiProcessorCount*2;
+  std::cout << "number of blocks:" << blocks_ << std::endl;
   /*
   std::cout << "My name:" << species_.get_name_id() << std::endl;
   for(unsigned i(0); i != is_reactive_.size(); ++i) {
@@ -87,11 +93,14 @@ double Diffuser::get_D() const {
   return D_;
 }
 
-/* <-block0-><-block1-><-block2->
+/* kernel<<<3, 5>>>()
+   <-block0-><-block1-><-block2->
    |0|1|2|3|4|0|1|2|3|4|0|1|2|3|4|
+   gridDim = number of blocks in a grid = 3
    blockDim = number of threads per block = 5
    blockIdx = index of the block = [0,1,2]
    threadIdx = index of the thread in a block = [0,1,2,3,4]
+   980 GTX: multiProcessorCount = 16
 */
 
 __global__
@@ -104,8 +113,10 @@ void concurrent_walk(
     umol_t* mols_,
     const mol_t* offsets_,
     voxel_t* voxels_) {
-  const unsigned index(blockIdx.x*blockDim.x + threadIdx.x);
-  if(index < mol_size_) {
+  //index is the unique id of all the threads from all blocks
+  unsigned index(blockIdx.x*blockDim.x + threadIdx.x);
+  const unsigned total_threads(blockDim.x*gridDim.x);
+  while(index < mol_size_) {
     const umol_t vdx(mols_[index]);
     thrust::default_random_engine rng;
     rng.discard(seed_+index);
@@ -123,12 +134,14 @@ void concurrent_walk(
       mols_[index] = val;
     }
     //Do nothing, stay at original position
+    index += total_threads;
   }
+  __syncthreads();
 }
 
 void Diffuser::walk() {
   const size_t size(mols_.size());
-  concurrent_walk<<<(size+511)/512, 512>>>(
+  concurrent_walk<<<blocks_, 512>>>(
       size,
       seed_,
       stride_,
@@ -137,10 +150,76 @@ void Diffuser::walk() {
       thrust::raw_pointer_cast(&mols_[0]),
       thrust::raw_pointer_cast(&offsets_[0]),
       thrust::raw_pointer_cast(&voxels_[0]));
-  //barrier until all CUDA calls have completed:
-  cudaDeviceSynchronize();
+  //barrier cudaDeviceSynchronize() is not needed here since all work will be
+  //queued in the stream sequentially by the CPU to be executed by GPU.
+  //kernel1<<<X,Y>>>(...); // kernel start execution, CPU continues to next
+                           // statement
+  //kernel2<<<X,Y>>>(...); // kernel is placed in queue and will start after
+                           // kernel1 finishes, CPU continues to next statement
+  //cudaMemcpy(...); // CPU blocks until ememory is copied, memory copy starts
+                     // only after kernel2 finishes
   seed_ += size;
 }
+
+/* with minimal number of blocks: 41.2 s
+__global__
+void concurrent_walk(
+    const unsigned mol_size_,
+    const unsigned seed_,
+    const voxel_t stride_,
+    const voxel_t id_stride_,
+    const voxel_t vac_id_,
+    umol_t* mols_,
+    const mol_t* offsets_,
+    voxel_t* voxels_) {
+  //index is the unique id of all the threads from all blocks
+  unsigned index(blockIdx.x*blockDim.x + threadIdx.x);
+  const unsigned total_threads(blockDim.x*gridDim.x);
+  while(index < mol_size_) {
+    const umol_t vdx(mols_[index]);
+    thrust::default_random_engine rng;
+    rng.discard(seed_+index);
+    thrust::uniform_int_distribution<unsigned> u(0, 11);
+    const unsigned rand(u(rng));
+    const bool odd_lay((vdx/NUM_COLROW)&1);
+    const bool odd_col((vdx%NUM_COLROW/NUM_ROW)&1);
+    mol2_t val(mol2_t(vdx)+offsets_[rand+(24&(-odd_lay))+(12&(-odd_col))]);
+    //Atomically put the current molecule id, index+id_stride_ at the target
+    //voxel if it is vacant: 
+    const voxel_t tar_mol_id(atomicCAS(voxels_+val, vac_id_, index+id_stride_));
+    //If not occupied, finalize walk:
+    if(tar_mol_id == vac_id_) {
+      voxels_[vdx] = vac_id_;
+      mols_[index] = val;
+    }
+    //Do nothing, stay at original position
+    index += total_threads;
+  }
+  __syncthreads();
+}
+
+void Diffuser::walk() {
+  const size_t size(mols_.size());
+  concurrent_walk<<<blocks_, 512>>>(
+      size,
+      seed_,
+      stride_,
+      id_stride_,
+      vac_id_,
+      thrust::raw_pointer_cast(&mols_[0]),
+      thrust::raw_pointer_cast(&offsets_[0]),
+      thrust::raw_pointer_cast(&voxels_[0]));
+  //barrier cudaDeviceSynchronize() is not needed here since all work will be
+  //queued in the stream sequentially by the CPU to be executed by GPU.
+  //kernel1<<<X,Y>>>(...); // kernel start execution, CPU continues to next
+                           // statement
+  //kernel2<<<X,Y>>>(...); // kernel is placed in queue and will start after
+                           // kernel1 finishes, CPU continues to next statement
+  //cudaMemcpy(...); // CPU blocks until ememory is copied, memory copy starts
+                     // only after kernel2 finishes
+  seed_ += size;
+}
+*/
 
 /* with cudaDeviceSynchronize barrier: 42.8 s
 __global__
