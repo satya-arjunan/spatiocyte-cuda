@@ -53,6 +53,7 @@ private:
   thrust::device_vector<mol_t>& offsets_;
   const voxel_t species_id_;
   const voxel_t vac_id_;
+  const voxel_t null_id_;
   unsigned seed_;
   unsigned blocks_;
   voxel_t stride_;

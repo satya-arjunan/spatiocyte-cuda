@@ -48,6 +48,7 @@ Diffuser::Diffuser(const double D, Species& species):
   offsets_(species_.get_compartment().get_offsets()),
   species_id_(species_.get_id()),
   vac_id_(species_.get_vac_id()),
+  null_id_(species_.get_model().get_null_id()),
   seed_(0) {
 }
 
@@ -110,10 +111,11 @@ void concurrent_walk(
     const voxel_t stride_,
     const voxel_t id_stride_,
     const voxel_t vac_id_,
+    const voxel_t null_id_,
     umol_t* mols_,
     const mol_t* offsets_,
     voxel_t* voxels_) {
-  //index is the unique id of all the threads from all blocks
+  //index is the unique global thread id (size: total_threads)
   unsigned index(blockIdx.x*blockDim.x + threadIdx.x);
   const unsigned total_threads(blockDim.x*gridDim.x);
   while(index < mol_size_) {
@@ -136,7 +138,7 @@ void concurrent_walk(
     //Do nothing, stay at original position
     index += total_threads;
   }
-  __syncthreads();
+  //__syncthreads();
 }
 
 void Diffuser::walk() {
@@ -147,6 +149,7 @@ void Diffuser::walk() {
       stride_,
       id_stride_,
       vac_id_,
+      null_id_,
       thrust::raw_pointer_cast(&mols_[0]),
       thrust::raw_pointer_cast(&offsets_[0]),
       thrust::raw_pointer_cast(&voxels_[0]));
@@ -160,6 +163,68 @@ void Diffuser::walk() {
                      // only after kernel2 finishes
   seed_ += size;
 }
+
+/* without reactions: 38.5 s
+__global__
+void concurrent_walk(
+    const unsigned mol_size_,
+    const unsigned seed_,
+    const voxel_t stride_,
+    const voxel_t id_stride_,
+    const voxel_t vac_id_,
+    const voxel_t null_id_,
+    umol_t* mols_,
+    const mol_t* offsets_,
+    voxel_t* voxels_) {
+  //index is the unique global thread id (size: total_threads)
+  unsigned index(blockIdx.x*blockDim.x + threadIdx.x);
+  const unsigned total_threads(blockDim.x*gridDim.x);
+  while(index < mol_size_) {
+    const umol_t vdx(mols_[index]);
+    thrust::default_random_engine rng;
+    rng.discard(seed_+index);
+    thrust::uniform_int_distribution<unsigned> u(0, 11);
+    const unsigned rand(u(rng));
+    const bool odd_lay((vdx/NUM_COLROW)&1);
+    const bool odd_col((vdx%NUM_COLROW/NUM_ROW)&1);
+    mol2_t val(mol2_t(vdx)+offsets_[rand+(24&(-odd_lay))+(12&(-odd_col))]);
+    //Atomically put the current molecule id, index+id_stride_ at the target
+    //voxel if it is vacant: 
+    const voxel_t tar_mol_id(atomicCAS(voxels_+val, vac_id_, index+id_stride_));
+    //If not occupied, finalize walk:
+    if(tar_mol_id == vac_id_) {
+      voxels_[vdx] = vac_id_;
+      mols_[index] = val;
+    }
+    //Do nothing, stay at original position
+    index += total_threads;
+  }
+  //__syncthreads();
+}
+
+void Diffuser::walk() {
+  const size_t size(mols_.size());
+  concurrent_walk<<<blocks_, 512>>>(
+      size,
+      seed_,
+      stride_,
+      id_stride_,
+      vac_id_,
+      null_id_,
+      thrust::raw_pointer_cast(&mols_[0]),
+      thrust::raw_pointer_cast(&offsets_[0]),
+      thrust::raw_pointer_cast(&voxels_[0]));
+  //barrier cudaDeviceSynchronize() is not needed here since all work will be
+  //queued in the stream sequentially by the CPU to be executed by GPU.
+  //kernel1<<<X,Y>>>(...); // kernel start execution, CPU continues to next
+                           // statement
+  //kernel2<<<X,Y>>>(...); // kernel is placed in queue and will start after
+                           // kernel1 finishes, CPU continues to next statement
+  //cudaMemcpy(...); // CPU blocks until ememory is copied, memory copy starts
+                     // only after kernel2 finishes
+  seed_ += size;
+}
+*/
 
 /* with minimal number of blocks: 41.2 s
 __global__

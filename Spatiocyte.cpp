@@ -37,9 +37,10 @@
 
 int main() {
   Model model;
-  Species A("A", 800000, 1e-12, model, model.get_compartment(),
+  Species A("A", 1600512, 1e-12, model, model.get_compartment(),
             model.get_compartment().get_volume_species());
-  Species B("B", 800000, 1e-12, model, model.get_compartment(),
+  /*
+  Species B("B", 800256, 1e-12, model, model.get_compartment(),
             model.get_compartment().get_volume_species());
   Species C("C", 0, 1e-12, model, model.get_compartment(),
             model.get_compartment().get_volume_species());
@@ -48,15 +49,20 @@ int main() {
   AB_to_C.push_substrate(B);
   AB_to_C.push_product(C);
   AB_to_C.set_p(1);
+  */
   model.initialize();
   VisualLogger visual_logger(model);
   model.get_stepper().push_diffuser(A.get_diffuser());
+  /*
   model.get_stepper().push_diffuser(B.get_diffuser());
   model.get_stepper().push_diffuser(C.get_diffuser());
+  */
   model.get_stepper().set_visual_logger(visual_logger);
   visual_logger.push_species(A);
+  /*
   visual_logger.push_species(B);
   visual_logger.push_species(C);
+  */
   //visual_logger.push_species(model.get_compartment().get_surface_species());
   //visual_logger.push_species(model.get_compartment().get_volume_species());
   visual_logger.initialize();
