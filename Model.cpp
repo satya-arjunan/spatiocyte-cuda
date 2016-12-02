@@ -55,11 +55,12 @@ voxel_t Model::get_stride() const {
   return stride_;
 }
 
-void Model::run(const double interval) {
+unsigned Model::run(const double interval) {
   const unsigned steps(interval/4.16667e-6);
   for (unsigned i(0); i != steps; ++i) {
       stepper_.step();
     }
+  return steps;
 }
 
 unsigned Model::push_species(Species& species) {

@@ -80,7 +80,7 @@ void Diffuser::initialize() {
   //better performance when the number of blocks is twice the number of 
   //multi processors (aka streams):
   blocks_ = prop.multiProcessorCount*2;
-  std::cout << "number of blocks:" << blocks_ << std::endl;
+  std::cout << "number of blocks:" << blocks_ << " maj:" << prop.major << " min:" << prop.minor << std::endl;
   /*
   std::cout << "My name:" << species_.get_name_id() << std::endl;
   for(unsigned i(0); i != is_reactive_.size(); ++i) {

@@ -17,7 +17,7 @@ LDFLAGS = # -L$(HOME)/root/lib -lRandom
 #CXXFLAGS = -O3 -march=native -mavx -Werror -Wfatal-errors -Wall -std=c++0x #-fprofile-use #-pg -fprofile-generate
 #CXXFLAGS = -O3 -march=core-avx2 -Wfatal-errors -Wall -std=c++0x #-fprofile-use #-pg -fprofile-generate
 CXXFLAGS = -O3 -std=c++11 #-fprofile-use #-pg -fprofile-generate
-CXXEFLAGS = 
+CXXEFLAGS = -gencode arch=compute_52,code=sm_52 
 #CXX = icc
 #CXX = g++
 CXX = g++
@@ -39,10 +39,10 @@ $(VISUALIZER):
 		$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(IFLAGS) $(GUIFLAGS) -o $@ $(VIS).cpp $(GUILIBS)
 
 %.o: %.cpp
-		$(CUXX) $(CXXFLAGS) $(IFLAGS) -c -o $@ $<
+		$(CUXX) $(CXXFLAGS) $(CXXEFLAGS) $(IFLAGS) -c -o $@ $<
 
 %.o: %.cu
-		$(CUXX) $(CXXFLAGS) $(IFLAGS) -c -o $@ $<
+		$(CUXX) $(CXXFLAGS) $(CXXEFLAGS) $(IFLAGS) -c -o $@ $<
 
 clean:
 		rm -f $(SPATIOCYTE_CUDA) $(VISUALIZER) *.o

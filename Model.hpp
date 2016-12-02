@@ -42,7 +42,7 @@ class Model {
   Model();
   ~Model() {}
   void initialize();
-  void run(const double);
+  unsigned run(const double);
   unsigned push_species(Species&);
   Compartment& get_compartment();
   Stepper& get_stepper();
