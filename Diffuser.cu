@@ -44,14 +44,12 @@ Diffuser::Diffuser(const double D, Species& species):
   species_(species),
   compartment_(species_.get_compartment()),
   mols_(species_.get_mols()),
+  blocks_(compartment_.get_model().get_blocks()),
   voxels_(compartment_.get_lattice().get_voxels()),
   offsets_(compartment_.get_offsets()),
-  randoms_(compartment_.get_model().get_randoms()),
-  randoms_counter_(compartment_.get_model().get_randoms_counter()),
   species_id_(species_.get_id()),
   vac_id_(species_.get_vac_id()),
-  null_id_(species_.get_model().get_null_id()),
-  seed_(0) {
+  null_id_(species_.get_model().get_null_id()) {
 }
 
 void Diffuser::initialize() {
@@ -77,19 +75,6 @@ void Diffuser::initialize() {
       } 
     } 
   } 
-  cudaDeviceProp prop;
-  cudaGetDeviceProperties(&prop, 0);
-  //better performance when the number of blocks is twice the number of 
-  //multi processors (aka streams):
-  blocks_ = prop.multiProcessorCount*2;
-  std::cout << "number of blocks:" << blocks_ << " maj:" << prop.major << " min:" << prop.minor << std::endl;
-  /*
-  std::cout << "My name:" << species_.get_name_id() << std::endl;
-  for(unsigned i(0); i != is_reactive_.size(); ++i) {
-    std::cout << "\t" << is_reactive_[i] << " reactant name:" << model.get_species()[i]->get_name_id() << std::endl;
-    std::cout << "\t" << (reactions_[i] != NULL) << std::endl;
-  }
-  */
 }
 
 double Diffuser::get_D() const {
@@ -109,7 +94,6 @@ double Diffuser::get_D() const {
 __global__
 void concurrent_walk(
     const unsigned mol_size_,
-    const unsigned seed_,
     const voxel_t stride_,
     const voxel_t id_stride_,
     const voxel_t vac_id_,
@@ -120,12 +104,11 @@ void concurrent_walk(
   //index is the unique global thread id (size: total_threads)
   unsigned index(blockIdx.x*blockDim.x + threadIdx.x);
   const unsigned total_threads(blockDim.x*gridDim.x);
+  curandState local_state = curand_states[blockIdx.x][threadIdx.x];
   while(index < mol_size_) {
     const umol_t vdx(mols_[index]);
-    thrust::default_random_engine rng;
-    rng.discard(seed_+index);
-    thrust::uniform_int_distribution<unsigned> u(0, 11);
-    const unsigned rand(u(rng));
+    float ranf(curand_uniform(&local_state)*11.999999);
+    const unsigned rand((unsigned)truncf(ranf));
     const bool odd_lay((vdx/NUM_COLROW)&1);
     const bool odd_col((vdx%NUM_COLROW/NUM_ROW)&1);
     mol2_t val(mol2_t(vdx)+offsets_[rand+(24&(-odd_lay))+(12&(-odd_col))]);
@@ -140,14 +123,14 @@ void concurrent_walk(
     //Do nothing, stay at original position
     index += total_threads;
   }
+  curand_states[blockIdx.x][threadIdx.x] = local_state;
   //__syncthreads();
 }
 
 void Diffuser::walk() {
   const size_t size(mols_.size());
-  concurrent_walk<<<blocks_, 512>>>(
+  concurrent_walk<<<blocks_, 256>>>(
       size,
-      seed_,
       stride_,
       id_stride_,
       vac_id_,
@@ -163,7 +146,6 @@ void Diffuser::walk() {
                            // kernel1 finishes, CPU continues to next statement
   //cudaMemcpy(...); // CPU blocks until ememory is copied, memory copy starts
                      // only after kernel2 finishes
-  seed_ += size;
 }
 
 /* with curand: 42.5 s

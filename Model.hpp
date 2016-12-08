@@ -36,8 +36,11 @@
 #include <Compartment.hpp>
 #include <Stepper.hpp>
 #include <thrust/device_vector.h>
+#include <curand_kernel.h>
 #include <curand.h>
 #include <sstream>
+
+extern __device__ curandState* curand_states[64];
 
 class Model {
  public: 
@@ -51,21 +54,15 @@ class Model {
   std::vector<Species*>& get_species();
   voxel_t get_null_id() const;
   voxel_t get_stride() const;
-  thrust::device_vector<float>& get_randoms();
-  unsigned get_randoms_size() const;
-  unsigned& get_randoms_counter();
-  void generate_randoms();
+  unsigned& get_blocks();
  private:
+  void initialize_random_generator();
   std::vector<Species*> species_;
   const voxel_t null_id_;
-  const unsigned randoms_size_;
-  unsigned randoms_counter_;
+  unsigned blocks_;
   Stepper stepper_;
-  Compartment compartment_; //must declare this at the end after initializing others
+  Compartment compartment_; //must declare this after initializing others
   voxel_t stride_;
-  curandGenerator_t random_generator_;
-  thrust::device_vector<float> randoms_;
 };
 
 #endif /* __Model_hpp */
-
