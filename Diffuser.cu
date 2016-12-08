@@ -49,7 +49,8 @@ Diffuser::Diffuser(const double D, Species& species):
   offsets_(compartment_.get_offsets()),
   species_id_(species_.get_id()),
   vac_id_(species_.get_vac_id()),
-  null_id_(species_.get_model().get_null_id()) {
+  null_id_(species_.get_model().get_null_id()),
+  seed_(0) {
 }
 
 void Diffuser::initialize() {
@@ -92,6 +93,60 @@ double Diffuser::get_D() const {
 */
 
 
+__global__
+void concurrent_walk(
+    const unsigned mol_size_,
+    const unsigned seed_,
+    const voxel_t stride_,
+    const voxel_t id_stride_,
+    const voxel_t vac_id_,
+    const voxel_t null_id_,
+    umol_t* mols_,
+    const mol_t* offsets_,
+    voxel_t* voxels_) {
+  //index is the unique global thread id (size: total_threads)
+  unsigned index(blockIdx.x*blockDim.x + threadIdx.x);
+  const unsigned total_threads(blockDim.x*gridDim.x);
+  while(index < mol_size_) {
+    const umol_t vdx(mols_[index]);
+    thrust::default_random_engine rng;
+    rng.discard(seed_+index);
+    thrust::uniform_int_distribution<unsigned> u(0, 11);
+    const unsigned rand(u(rng));
+    const bool odd_lay((vdx/NUM_COLROW)&1);
+    const bool odd_col((vdx%NUM_COLROW/NUM_ROW)&1);
+    mol2_t val(mol2_t(vdx)+offsets_[rand+(24&(-odd_lay))+(12&(-odd_col))]);
+    //Atomically put the current molecule id, index+id_stride_ at the target
+    //voxel if it is vacant: 
+    const voxel_t tar_mol_id(atomicCAS(voxels_+val, vac_id_, index+id_stride_));
+    //If not occupied, finalize walk:
+    if(tar_mol_id == vac_id_) {
+      voxels_[vdx] = vac_id_;
+      mols_[index] = val;
+    }
+    //Do nothing, stay at original position
+    index += total_threads;
+  }
+  //__syncthreads();
+}
+
+void Diffuser::walk() {
+  const size_t size(mols_.size());
+  concurrent_walk<<<32, 512>>>(
+      size,
+      seed_,
+      stride_,
+      id_stride_,
+      vac_id_,
+      null_id_,
+      thrust::raw_pointer_cast(&mols_[0]),
+      thrust::raw_pointer_cast(&offsets_[0]),
+      thrust::raw_pointer_cast(&voxels_[0]));
+  seed_ += size;
+}
+
+
+/* without offsets: 43.5 s
 __device__
 unsigned get_tar(
     const unsigned vdx,
@@ -126,52 +181,6 @@ unsigned get_tar(
   return vdx-1;
 }
 
-
-__global__
-void concurrent_walk(
-    const unsigned mol_size_,
-    const voxel_t stride_,
-    const voxel_t id_stride_,
-    const voxel_t vac_id_,
-    const voxel_t null_id_,
-    umol_t* mols_,
-    voxel_t* voxels_) {
-  //index is the unique global thread id (size: total_threads)
-  unsigned index(blockIdx.x*blockDim.x + threadIdx.x);
-  const unsigned total_threads(blockDim.x*gridDim.x);
-  curandState local_state = curand_states[blockIdx.x][threadIdx.x];
-  while(index < mol_size_) {
-    const umol_t vdx(mols_[index]);
-    float ranf(curand_uniform(&local_state)*11.999999);
-    const unsigned rand((unsigned)truncf(ranf));
-    mol2_t val(get_tar(vdx, rand));
-    //Atomically put the current molecule id, index+id_stride_ at the target
-    //voxel if it is vacant: 
-    const voxel_t tar_mol_id(atomicCAS(voxels_+val, vac_id_, index+id_stride_));
-    //If not occupied, finalize walk:
-    if(tar_mol_id == vac_id_) {
-      voxels_[vdx] = vac_id_;
-      mols_[index] = val;
-    }
-    //Do nothing, stay at original position
-    index += total_threads;
-  }
-  curand_states[blockIdx.x][threadIdx.x] = local_state;
-}
-
-void Diffuser::walk() {
-  const size_t size(mols_.size());
-  concurrent_walk<<<blocks_, 256>>>(
-      size,
-      stride_,
-      id_stride_,
-      vac_id_,
-      null_id_,
-      thrust::raw_pointer_cast(&mols_[0]),
-      thrust::raw_pointer_cast(&voxels_[0]));
-}
-
-/* without offsets: 43.5 s
 __global__
 void concurrent_walk(
     const unsigned mol_size_,
