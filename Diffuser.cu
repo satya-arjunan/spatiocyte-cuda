@@ -143,7 +143,64 @@ void Diffuser::walk() {
       thrust::raw_pointer_cast(&offsets_[0]),
       thrust::raw_pointer_cast(&voxels_[0]));
   seed_ += size;
+  cudaThreadSynchronize();
 }
+
+/*
+// with thread sync: 0.48 BUPS
+__global__
+void concurrent_walk(
+    const unsigned mol_size_,
+    const unsigned seed_,
+    const voxel_t stride_,
+    const voxel_t id_stride_,
+    const voxel_t vac_id_,
+    const voxel_t null_id_,
+    umol_t* mols_,
+    const mol_t* offsets_,
+    voxel_t* voxels_) {
+  //index is the unique global thread id (size: total_threads)
+  unsigned index(blockIdx.x*blockDim.x + threadIdx.x);
+  const unsigned total_threads(blockDim.x*gridDim.x);
+  while(index < mol_size_) {
+    const umol_t vdx(mols_[index]);
+    thrust::default_random_engine rng;
+    rng.discard(seed_+index);
+    thrust::uniform_int_distribution<unsigned> u(0, 11);
+    const unsigned rand(u(rng));
+    const bool odd_lay((vdx/NUM_COLROW)&1);
+    const bool odd_col((vdx%NUM_COLROW/NUM_ROW)&1);
+    mol2_t val(mol2_t(vdx)+offsets_[rand+(24&(-odd_lay))+(12&(-odd_col))]);
+    //Atomically put the current molecule id, index+id_stride_ at the target
+    //voxel if it is vacant: 
+    const voxel_t tar_mol_id(atomicCAS(voxels_+val, vac_id_, index+id_stride_));
+    //If not occupied, finalize walk:
+    if(tar_mol_id == vac_id_) {
+      voxels_[vdx] = vac_id_;
+      mols_[index] = val;
+    }
+    //Do nothing, stay at original position
+    index += total_threads;
+  }
+  //__syncthreads();
+}
+
+void Diffuser::walk() {
+  const size_t size(mols_.size());
+  concurrent_walk<<<32, 512>>>(
+      size,
+      seed_,
+      stride_,
+      id_stride_,
+      vac_id_,
+      null_id_,
+      thrust::raw_pointer_cast(&mols_[0]),
+      thrust::raw_pointer_cast(&offsets_[0]),
+      thrust::raw_pointer_cast(&voxels_[0]));
+  seed_ += size;
+  cudaThreadSynchronize();
+}
+*/
 
 
 /* without offsets: 43.5 s
