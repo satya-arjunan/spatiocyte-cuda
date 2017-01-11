@@ -176,12 +176,12 @@ void concurrent_walk(
     mol2_t val(mol2_t(vdx)+offsets_[rand+(24&(-odd_lay))+(12&(-odd_col))]);
     //Atomically put the current molecule id, index+id_stride_ at the target
     //voxel if it is vacant: 
-    //voxel_t tar_mol_id(atomicCAS(voxels_+val, vac_id_, index+id_stride_));
+    voxel_t tar_mol_id(atomicCAS(voxels_+val, vac_id_, index+id_stride_));
     //If not occupied, finalize walk:
-    //if(tar_mol_id == vac_id_) {
-      //voxels_[vdx] = vac_id_;
+    if(tar_mol_id == vac_id_) {
+      voxels_[vdx] = vac_id_;
       mols_[index] = val;
-    //}
+    }
     index += total_threads;
     if(index < mol_size_) {
       rand16 = (uint16_t)(rand32 >> 16);
@@ -190,12 +190,12 @@ void concurrent_walk(
       odd_lay = (vdx/NUM_COLROW)&1;
       odd_col = (vdx%NUM_COLROW/NUM_ROW)&1;
       val = mol2_t(vdx)+offsets_[rand+(24&(-odd_lay))+(12&(-odd_col))];
-      //tar_mol_id = (atomicCAS(voxels_+val, vac_id_, index+id_stride_));
+      tar_mol_id = (atomicCAS(voxels_+val, vac_id_, index+id_stride_));
       //If not occupied, finalize walk:
-      //if(tar_mol_id == vac_id_) {
-        //voxels_[vdx] = vac_id_;
+      if(tar_mol_id == vac_id_) {
+        voxels_[vdx] = vac_id_;
         mols_[index] = val;
-      //}
+      }
       index += total_threads;
     }
   }
