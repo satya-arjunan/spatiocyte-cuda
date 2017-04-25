@@ -93,6 +93,7 @@ double Diffuser::get_D() const {
 */
 
 
+/*
 __global__
 void concurrent_walk(
     const unsigned mol_size_,
@@ -216,6 +217,7 @@ void Diffuser::walk() {
   seed_ += size;
   cudaThreadSynchronize();
 }
+*/
 
 /*
 //without voxels: 18.2 BUPS
@@ -584,8 +586,7 @@ void Diffuser::walk() {
 }
    */
 
-/*
-// with thread sync: 0.48 BUPS
+//with thread sync: 0.554 GUPS
 __global__
 void concurrent_walk(
     const unsigned mol_size_,
@@ -617,10 +618,8 @@ void concurrent_walk(
       voxels_[vdx] = vac_id_;
       mols_[index] = val;
     }
-    //Do nothing, stay at original position
     index += total_threads;
   }
-  //__syncthreads();
 }
 
 void Diffuser::walk() {
@@ -638,7 +637,6 @@ void Diffuser::walk() {
   seed_ += size;
   cudaThreadSynchronize();
 }
-*/
 
 
 /* without offsets: 43.5 s
@@ -837,7 +835,8 @@ void Diffuser::walk() {
 }
 */
 
-/* without reactions: 38.5 s
+/*
+//without reactions: 0.490 GUPS
 __global__
 void concurrent_walk(
     const unsigned mol_size_,
@@ -1009,7 +1008,8 @@ void Diffuser::walk() {
 }
 */
 
-/* Without thrust: 40.8 s
+/*
+//Without thrust: 0.497 GUPS
 __global__
 void concurrent_walk(
     const unsigned mol_size_,
